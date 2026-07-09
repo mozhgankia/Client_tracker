@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>پیگیری مشتریان واتساپ</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>📋 پیگیری مشتریان واتساپ</h1>
+  <div class="topbar-actions">
+    <span id="todayDate" class="today-date"></span>
+    <button id="btnExport" class="btn btn-ghost">خروجی پشتیبان (JSON)</button>
+    <label class="btn btn-ghost file-btn">
+      ورود پشتیبان
+      <input type="file" id="importFile" accept="application/json" hidden>
+    </label>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tab-btn active" data-tab="followup">🔔 پیگیری امروز</button>
+  <button class="tab-btn" data-tab="customers">👥 مشتری‌ها</button>
+  <button class="tab-btn" data-tab="projects">🏗️ پروژه‌های پیش‌فروش (ریلی)</button>
+  <button class="tab-btn" data-tab="listings">🏠 بازار ثانویه (فایل خودم)</button>
+</nav>
+
+<main>
+
+  <!-- FOLLOW UP TAB -->
+  <section id="tab-followup" class="tab-panel active">
+    <div class="panel-head">
+      <h2>مشتری‌هایی که امروز باید بهشون پیام بدید</h2>
+      <p class="hint">بر اساس پتانسیل خرید: زیاد=هر ۷ روز، متوسط=هر ۲۱ روز، کم=هر ۴۲ روز</p>
+    </div>
+    <div id="followupList" class="card-list"></div>
+  </section>
+
+  <!-- CUSTOMERS TAB -->
+  <section id="tab-customers" class="tab-panel">
+    <div class="panel-head">
+      <h2>لیست مشتری‌ها</h2>
+      <button id="btnAddCustomer" class="btn btn-primary">+ مشتری جدید</button>
+    </div>
+
+    <div class="filters">
+      <select id="filterType">
+        <option value="">همه نوع‌ها</option>
+        <option value="residential">رزیدنشال</option>
+        <option value="commercial">کامرشال</option>
+      </select>
+      <select id="filterSubtype">
+        <option value="">پیش‌فروش/آماده</option>
+        <option value="presale">پیش‌فروش</option>
+        <option value="ready">آماده</option>
+      </select>
+      <select id="filterPotential">
+        <option value="">همه پتانسیل‌ها</option>
+        <option value="high">زیاد</option>
+        <option value="medium">متوسط</option>
+        <option value="low">کم</option>
+      </select>
+      <select id="filterStatus">
+        <option value="">همه وضعیت‌ها</option>
+        <option value="following">در حال پیگیری</option>
+        <option value="viewing">ویووینگ اومده</option>
+        <option value="purchased">خرید کرده</option>
+        <option value="multiplePurchases">چند خرید داشته</option>
+        <option value="purchasedElsewhere">با کس دیگه خرید کرده</option>
+      </select>
+      <input id="filterSearch" type="text" placeholder="جستجوی نام یا شماره...">
+    </div>
+
+    <div id="customerList" class="card-list"></div>
+  </section>
+
+  <!-- PROJECTS TAB -->
+  <section id="tab-projects" class="tab-panel">
+    <div class="panel-head">
+      <h2>پروژه‌های پیش‌فروش</h2>
+      <button id="btnAddProject" class="btn btn-primary">+ پروژه جدید</button>
+    </div>
+    <p class="hint">این بخش جایگزین داخلی اپلیکیشن «ریلی» است — چون این اپ به API ریلی وصل نیست، پروژه‌های پیش‌فروش‌تان را همین‌جا وارد کنید تا در پیام یادآوری روزانه، پروژه مناسب هر مشتری پیشنهاد شود.</p>
+    <div id="projectList" class="card-list"></div>
+  </section>
+
+  <!-- LISTINGS TAB -->
+  <section id="tab-listings" class="tab-panel">
+    <div class="panel-head">
+      <h2>فایل بازار ثانویه (آماده)</h2>
+      <button id="btnAddListing" class="btn btn-primary">+ ملک جدید</button>
+    </div>
+    <p class="hint">فایل خودتان برای املاک آماده/ثانویه — برای پیشنهاد به مشتری‌های «آماده» استفاده می‌شود.</p>
+    <div id="listingList" class="card-list"></div>
+  </section>
+
+</main>
+
+<!-- Customer Modal -->
+<div id="customerModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3 id="customerModalTitle">مشتری جدید</h3>
+    <form id="customerForm">
+      <input type="hidden" id="cId">
+      <label>نام مشتری *
+        <input type="text" id="cName" required>
+      </label>
+      <label>شماره تماس (واتساپ)
+        <input type="text" id="cPhone">
+      </label>
+      <div class="row2">
+        <label>نوع مشتری
+          <select id="cType">
+            <option value="residential">رزیدنشال</option>
+            <option value="commercial">کامرشال</option>
+          </select>
+        </label>
+        <label>دسته
+          <select id="cSubtype">
+            <option value="presale">پیش‌فروش</option>
+            <option value="ready">آماده</option>
+          </select>
+        </label>
+      </div>
+      <div class="row2">
+        <label>پتانسیل خرید
+          <select id="cPotential">
+            <option value="high">زیاد (هفتگی)</option>
+            <option value="medium">متوسط (هر ۳ هفته)</option>
+            <option value="low">کم (هر ۶ هفته)</option>
+          </select>
+        </label>
+        <label>علاقه‌مندی (جواب می‌دهد؟)
+          <select id="cInterested">
+            <option value="yes">بله، جواب می‌دهد</option>
+            <option value="no">خیر، جواب نمی‌دهد</option>
+            <option value="unknown">نامشخص</option>
+          </select>
+        </label>
+      </div>
+      <div class="row2">
+        <label>تاریخ اولین پیام مشتری
+          <input type="date" id="cFirstMsgDate">
+        </label>
+        <label>تاریخ آخرین فالوآپ
+          <input type="date" id="cLastFollowUp">
+        </label>
+      </div>
+      <label>وضعیت
+        <select id="cStatus">
+          <option value="following">در حال پیگیری</option>
+          <option value="viewing">ویووینگ اومده</option>
+          <option value="purchased">خرید کرده</option>
+          <option value="multiplePurchases">چند خرید داشته</option>
+          <option value="purchasedElsewhere">با کس دیگه خرید کرده</option>
+        </select>
+      </label>
+      <label>پروژه / ملک مرتبط
+        <select id="cAssigned"></select>
+      </label>
+      <label>یادداشت
+        <textarea id="cNotes" rows="2"></textarea>
+      </label>
+
+      <fieldset class="chat-analyzer">
+        <legend>تحلیل خودکار از اکسپورت چت واتساپ (اختیاری)</legend>
+        <p class="hint">فایل txt خروجی «Export Chat» واتساپ را انتخاب کنید تا تاریخ اولین/آخرین پیام، پاسخگویی و پتانسیل خرید پیشنهادی به‌صورت خودکار استخراج شود. این فقط یک پیشنهاد است؛ نتیجه نهایی را خودتان تأیید یا اصلاح کنید.</p>
+        <input type="file" id="chatFile" accept=".txt">
+        <div id="chatAnalysisResult" class="analysis-result hidden"></div>
+      </fieldset>
+
+      <div class="modal-actions">
+        <button type="button" id="btnDeleteCustomer" class="btn btn-danger hidden">حذف مشتری</button>
+        <button type="button" id="btnCancelCustomer" class="btn btn-ghost">انصراف</button>
+        <button type="submit" class="btn btn-primary">ذخیره</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Project Modal -->
+<div id="projectModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3 id="projectModalTitle">پروژه پیش‌فروش جدید</h3>
+    <form id="projectForm">
+      <input type="hidden" id="pId">
+      <label>نام پروژه *
+        <input type="text" id="pName" required>
+      </label>
+      <div class="row2">
+        <label>نوع
+          <select id="pType">
+            <option value="residential">رزیدنشال</option>
+            <option value="commercial">کامرشال</option>
+          </select>
+        </label>
+        <label>وضعیت
+          <select id="pStatus">
+            <option value="active">فعال</option>
+            <option value="soldout">تکمیل ظرفیت</option>
+          </select>
+        </label>
+      </div>
+      <label>موقعیت / منطقه
+        <input type="text" id="pLocation">
+      </label>
+      <label>محدوده قیمت
+        <input type="text" id="pPrice">
+      </label>
+      <label>یادداشت
+        <textarea id="pNotes" rows="2"></textarea>
+      </label>
+      <div class="modal-actions">
+        <button type="button" id="btnDeleteProject" class="btn btn-danger hidden">حذف پروژه</button>
+        <button type="button" id="btnCancelProject" class="btn btn-ghost">انصراف</button>
+        <button type="submit" class="btn btn-primary">ذخیره</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Listing Modal -->
+<div id="listingModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3 id="listingModalTitle">ملک بازار ثانویه جدید</h3>
+    <form id="listingForm">
+      <input type="hidden" id="lId">
+      <label>عنوان ملک *
+        <input type="text" id="lName" required>
+      </label>
+      <div class="row2">
+        <label>نوع
+          <select id="lType">
+            <option value="residential">رزیدنشال</option>
+            <option value="commercial">کامرشال</option>
+          </select>
+        </label>
+        <label>وضعیت
+          <select id="lStatus">
+            <option value="active">فعال</option>
+            <option value="soldout">فروخته شده</option>
+          </select>
+        </label>
+      </div>
+      <label>موقعیت / منطقه
+        <input type="text" id="lLocation">
+      </label>
+      <label>قیمت
+        <input type="text" id="lPrice">
+      </label>
+      <label>یادداشت
+        <textarea id="lNotes" rows="2"></textarea>
+      </label>
+      <div class="modal-actions">
+        <button type="button" id="btnDeleteListing" class="btn btn-danger hidden">حذف ملک</button>
+        <button type="button" id="btnCancelListing" class="btn btn-ghost">انصراف</button>
+        <button type="submit" class="btn btn-primary">ذخیره</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
