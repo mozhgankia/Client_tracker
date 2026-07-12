@@ -1,0 +1,23 @@
+{
+  "_راهنما": "priority هرچه عدد کمتر باشد بالاتر نمایش داده می‌شود (1 = بالاترین اولویت). whatsapp_group_id فعلاً خالی بماند تا فاز ۲.",
+  "developers": [
+    {
+      "id": "dev-01",
+      "name": "نام سازنده ۱",
+      "website": "https://example.com",
+      "news_page": "https://example.com/news",
+      "priority": 1,
+      "whatsapp_group_id": null,
+      "active": true
+    },
+    {
+      "id": "dev-02",
+      "name": "نام سازنده ۲",
+      "website": "https://example.com",
+      "news_page": "https://example.com/news",
+      "priority": 2,
+      "whatsapp_group_id": null,
+      "active": true
+    }
+  ]
+}
