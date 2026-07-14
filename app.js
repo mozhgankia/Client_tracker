@@ -4,6 +4,7 @@
 
 const STORAGE_KEYS = {
   customers: 'wct_customers',
+  owners: 'wct_owners',
   projects: 'wct_projects',
   listings: 'wct_listings',
 };
@@ -21,6 +22,13 @@ const LABELS = {
     multiplePurchases: 'چند خرید داشته',
     purchasedElsewhere: 'با کس دیگه خرید کرده',
   },
+  ownerStatus: {
+    active: 'فعال / در حال فروش',
+    negotiating: 'در حال مذاکره',
+    sold: 'فروخته شد',
+    withdrawn: 'منصرف شد',
+  },
+  flexible: { yes: 'انعطاف داره', no: 'قیمت ثابت', unknown: 'نامشخص' },
   interested: { yes: 'پاسخگو', no: 'بی‌پاسخ', unknown: 'نامشخص' },
 };
 
@@ -42,14 +50,43 @@ function loadArr(key) {
 }
 function saveArr(key, arr) { localStorage.setItem(key, JSON.stringify(arr)); }
 
+// شماره تماس رو نرمال می‌کنه (فقط رقم، ۱۰ رقم آخر) تا با پیشوندهای مختلف (0/98/+98) یکسان مقایسه بشه
+function normalizePhone(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  return digits.slice(-10);
+}
+
 let customers = loadArr(STORAGE_KEYS.customers);
+let owners = loadArr(STORAGE_KEYS.owners);
 let projects = loadArr(STORAGE_KEYS.projects);
 let listings = loadArr(STORAGE_KEYS.listings);
 let autoProjects = []; // fetched from data/projects.json (developer news monitor)
+let contactInsights = []; // fetched from data/contact-insights.json (WhatsApp main-number bot)
 
 const persistCustomers = () => saveArr(STORAGE_KEYS.customers, customers);
+const persistOwners = () => saveArr(STORAGE_KEYS.owners, owners);
 const persistProjects = () => saveArr(STORAGE_KEYS.projects, projects);
 const persistListings = () => saveArr(STORAGE_KEYS.listings, listings);
+
+// ---------- زنده از ربات واتساپ متصل به شماره اصلی (data/contact-insights.json) ----------
+async function loadContactInsights() {
+  try {
+    const res = await fetch('data/contact-insights.json', { cache: 'no-store' });
+    if (!res.ok) return;
+    const raw = await res.json();
+    contactInsights = Array.isArray(raw) ? raw : [];
+  } catch {
+    contactInsights = [];
+  }
+  renderCustomers();
+  renderOwners();
+}
+
+function findInsightFor(record) {
+  const phone = normalizePhone(record.phone);
+  if (!phone) return null;
+  return contactInsights.find((i) => normalizePhone(i.phone) === phone) || null;
+}
 
 // ---------- auto-detected developer projects (data/projects.json) ----------
 async function loadAutoProjects() {
@@ -116,52 +153,83 @@ function suggestMatch(customer) {
   return pool.find((p) => p.type === customer.type && p.status !== 'soldout') || null;
 }
 
+function dueList(records, excludeStatuses) {
+  return records
+    .filter((r) => !excludeStatuses.includes(r.status))
+    .map((r) => {
+      const interval = POTENTIAL_INTERVAL_DAYS[r.potential] || 21;
+      const lastRef = r.lastFollowUp || r.firstMessageDate || r.firstContactDate;
+      const daysSince = lastRef ? daysBetween(lastRef, todayStr()) : Infinity;
+      return { r, interval, daysSince, overdueBy: daysSince - interval };
+    })
+    .filter((x) => x.daysSince >= x.interval);
+}
+
 function renderFollowup() {
   const container = $('#followupList');
   container.innerHTML = '';
 
-  const due = customers
-    .filter((c) => c.status !== 'purchasedElsewhere')
-    .map((c) => {
-      const interval = POTENTIAL_INTERVAL_DAYS[c.potential] || 21;
-      const lastRef = c.lastFollowUp || c.firstMessageDate;
-      const daysSince = lastRef ? daysBetween(lastRef, todayStr()) : Infinity;
-      return { c, interval, daysSince, overdueBy: daysSince - interval };
-    })
-    .filter((x) => x.daysSince >= x.interval)
-    .sort((a, b) => b.overdueBy - a.overdueBy);
+  const dueCustomers = dueList(customers, ['purchasedElsewhere']).map((x) => ({ ...x, kind: 'customer' }));
+  const dueOwners = dueList(owners, ['sold', 'withdrawn']).map((x) => ({ ...x, kind: 'owner' }));
+  const due = [...dueCustomers, ...dueOwners].sort((a, b) => b.overdueBy - a.overdueBy);
 
   if (due.length === 0) {
-    container.innerHTML = '<div class="empty-state">امروز هیچ مشتری‌ای برای پیام دادن سررسید نشده 🎉</div>';
+    container.innerHTML = '<div class="empty-state">امروز هیچ مشتری یا مالکی برای پیام دادن سررسید نشده 🎉</div>';
     return;
   }
 
-  due.forEach(({ c, daysSince }) => {
-    const suggestion = suggestMatch(c);
+  due.forEach(({ r, daysSince, kind }) => {
     const card = document.createElement('div');
     card.className = 'card';
+    const kindBadge = kind === 'owner' ? '<span class="badge">🔑 مالک</span>' : '<span class="badge">👥 مشتری</span>';
+    let suggestionHtml = '';
+    if (kind === 'customer') {
+      const suggestion = suggestMatch(r);
+      suggestionHtml = suggestion
+        ? `<div class="followup-suggestion">📎 پیشنهاد ${r.subtype === 'presale' ? 'پروژه' : 'ملک'}: <strong>${escapeHtml(suggestion.name)}</strong> ${suggestion.location ? `— ${escapeHtml(suggestion.location)}` : ''}</div>`
+        : `<div class="followup-suggestion">هنوز ${r.subtype === 'presale' ? 'پروژه‌ای در بخش پیش‌فروش' : 'ملکی در فایل بازار ثانویه'} برای پیشنهاد ثبت نشده.</div>`;
+    }
+    const subLine = kind === 'owner'
+      ? `${LABELS.type[r.type]} · ${daysSince === Infinity ? 'بدون فالوآپ قبلی' : `${daysSince} روز از آخرین فالوآپ`}`
+      : `${LABELS.type[r.type]} · ${LABELS.subtype[r.subtype]} · ${daysSince === Infinity ? 'بدون فالوآپ قبلی' : `${daysSince} روز از آخرین فالوآپ`}`;
+    const statusLabel = kind === 'owner' ? LABELS.ownerStatus[r.status] : LABELS.status[r.status];
     card.innerHTML = `
       <div class="card-top">
         <div>
-          <div class="card-name">${escapeHtml(c.name)} ${c.phone ? `<span class="card-sub">(${escapeHtml(c.phone)})</span>` : ''}</div>
-          <div class="card-sub">${LABELS.type[c.type]} · ${LABELS.subtype[c.subtype]} · ${daysSince === Infinity ? 'بدون فالوآپ قبلی' : `${daysSince} روز از آخرین فالوآپ`}</div>
+          <div class="card-name">${escapeHtml(r.name)} ${r.phone ? `<span class="card-sub">(${escapeHtml(r.phone)})</span>` : ''}</div>
+          <div class="card-sub">${subLine}</div>
           <div class="badges">
-            <span class="badge ${c.potential}">پتانسیل ${LABELS.potential[c.potential]}</span>
+            ${kindBadge}
+            <span class="badge ${r.potential}">پتانسیل ${LABELS.potential[r.potential]}</span>
             <span class="badge overdue">سررسید پیام</span>
-            <span class="badge">${LABELS.status[c.status]}</span>
+            <span class="badge">${statusLabel}</span>
           </div>
         </div>
         <div class="card-actions">
-          <button class="btn btn-primary btn-sm" data-action="mark-followup" data-id="${c.id}">ثبت پیام امروز</button>
-          <button class="btn btn-ghost btn-sm" data-action="edit-customer" data-id="${c.id}">جزئیات</button>
+          <button class="btn btn-primary btn-sm" data-action="${kind === 'owner' ? 'mark-followup-owner' : 'mark-followup'}" data-id="${r.id}">ثبت پیام امروز</button>
+          <button class="btn btn-ghost btn-sm" data-action="${kind === 'owner' ? 'edit-owner' : 'edit-customer'}" data-id="${r.id}">جزئیات</button>
         </div>
       </div>
-      ${suggestion
-        ? `<div class="followup-suggestion">📎 پیشنهاد ${c.subtype === 'presale' ? 'پروژه' : 'ملک'}: <strong>${escapeHtml(suggestion.name)}</strong> ${suggestion.location ? `— ${escapeHtml(suggestion.location)}` : ''}</div>`
-        : `<div class="followup-suggestion">هنوز ${c.subtype === 'presale' ? 'پروژه‌ای در بخش پیش‌فروش' : 'ملکی در فایل بازار ثانویه'} برای پیشنهاد ثبت نشده.</div>`}
+      ${suggestionHtml}
     `;
     container.appendChild(card);
   });
+}
+
+// بنر پیشنهاد زنده‌ی ربات واتساپ (شماره اصلی) برای یک مشتری/مالک، اگه پیام تازه‌ای تحلیل شده و هنوز اعمال نشده
+function renderInsightBanner(record, kind) {
+  const insight = findInsightFor(record);
+  if (!insight || record.lastInsightAppliedAt === insight.updated_at) return '';
+  return `
+    <div class="followup-suggestion insight-banner">
+      🤖 پیام تازه در واتساپ (${insight.last_message_at ? toFa(insight.last_message_at.slice(0, 10)) : 'اخیراً'}):
+      ${insight.last_message_preview ? `«${escapeHtml(insight.last_message_preview)}»<br>` : ''}
+      ${insight.note ? escapeHtml(insight.note) + '<br>' : ''}
+      پتانسیل پیشنهادی: <strong>${LABELS.potential[insight.suggested_potential] || '—'}</strong> ·
+      علاقه‌مندی: <strong>${LABELS.interested[insight.suggested_interested] || 'نامشخص'}</strong>
+      <div><button type="button" class="btn btn-primary btn-sm" data-action="apply-insight" data-kind="${kind}" data-id="${record.id}">اعمال پیشنهاد</button></div>
+    </div>
+  `;
 }
 
 function renderCustomers() {
@@ -210,6 +278,7 @@ function renderCustomers() {
         </div>
       </div>
       ${c.notes ? `<div class="followup-suggestion">${escapeHtml(c.notes)}</div>` : ''}
+      ${renderInsightBanner(c, 'customer')}
     `;
     container.appendChild(card);
   });
@@ -219,18 +288,92 @@ function renderCustomers() {
   $(`#${id}`).addEventListener('input', renderCustomers);
 });
 
+function renderOwners() {
+  const container = $('#ownerList');
+  const fType = $('#filterOwnerType').value;
+  const fPotential = $('#filterOwnerPotential').value;
+  const fStatus = $('#filterOwnerStatus').value;
+  const fSearch = $('#filterOwnerSearch').value.trim().toLowerCase();
+
+  const filtered = owners.filter((o) =>
+    (!fType || o.type === fType) &&
+    (!fPotential || o.potential === fPotential) &&
+    (!fStatus || o.status === fStatus) &&
+    (!fSearch || o.name.toLowerCase().includes(fSearch) || (o.phone || '').includes(fSearch))
+  );
+
+  container.innerHTML = '';
+  if (filtered.length === 0) {
+    container.innerHTML = '<div class="empty-state">مالکی یافت نشد. یک مالک جدید اضافه کنید.</div>';
+    return;
+  }
+
+  filtered.forEach((o) => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="card-top">
+        <div>
+          <div class="card-name">${escapeHtml(o.name)} ${o.phone ? `<span class="card-sub">(${escapeHtml(o.phone)})</span>` : ''}</div>
+          <div class="card-sub">
+            ${o.property ? escapeHtml(o.property) + ' · ' : ''}${o.price ? 'قیمت پیشنهادی: ' + escapeHtml(o.price) : ''}
+          </div>
+          <div class="card-sub">آخرین فالوآپ: ${o.lastFollowUp ? toFa(o.lastFollowUp) : '—'}</div>
+          <div class="badges">
+            <span class="badge">${LABELS.type[o.type]}</span>
+            <span class="badge ${o.potential}">${LABELS.potential[o.potential]}</span>
+            <span class="badge">${LABELS.ownerStatus[o.status]}</span>
+            <span class="badge">${LABELS.flexible[o.flexible]}</span>
+            <span class="badge">${LABELS.interested[o.interested]}</span>
+          </div>
+        </div>
+        <div class="card-actions">
+          <button class="btn btn-ghost btn-sm" data-action="edit-owner" data-id="${o.id}">ویرایش</button>
+        </div>
+      </div>
+      ${o.notes ? `<div class="followup-suggestion">${escapeHtml(o.notes)}</div>` : ''}
+      ${renderInsightBanner(o, 'owner')}
+    `;
+    container.appendChild(card);
+  });
+}
+
+['filterOwnerType', 'filterOwnerPotential', 'filterOwnerStatus', 'filterOwnerSearch'].forEach((id) => {
+  $(`#${id}`).addEventListener('input', renderOwners);
+});
+
 document.body.addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-action]');
   if (!btn) return;
-  const { action, id } = btn.dataset;
+  const { action, id, kind } = btn.dataset;
   if (action === 'edit-customer') openCustomerModal(id);
   if (action === 'mark-followup') {
     const c = customers.find((x) => x.id === id);
     if (c) { c.lastFollowUp = todayStr(); persistCustomers(); renderFollowup(); renderCustomers(); }
   }
+  if (action === 'edit-owner') openOwnerModal(id);
+  if (action === 'mark-followup-owner') {
+    const o = owners.find((x) => x.id === id);
+    if (o) { o.lastFollowUp = todayStr(); persistOwners(); renderFollowup(); renderOwners(); }
+  }
+  if (action === 'apply-insight') applyInsight(kind, id);
   if (action === 'edit-project') openProjectModal(id);
   if (action === 'edit-listing') openListingModal(id);
 });
+
+function applyInsight(kind, id) {
+  const list = kind === 'owner' ? owners : customers;
+  const record = list.find((x) => x.id === id);
+  if (!record) return;
+  const insight = findInsightFor(record);
+  if (!insight) return;
+  if (insight.suggested_potential) record.potential = insight.suggested_potential;
+  if (insight.suggested_interested && insight.suggested_interested !== 'unknown') record.interested = insight.suggested_interested;
+  if (insight.last_message_at) record.lastFollowUp = insight.last_message_at.slice(0, 10);
+  record.lastInsightAppliedAt = insight.updated_at;
+  if (kind === 'owner') { persistOwners(); renderOwners(); } else { persistCustomers(); renderCustomers(); }
+  renderFollowup();
+}
 
 // ---------- Customer modal ----------
 const customerModal = $('#customerModal');
@@ -305,6 +448,73 @@ $('#btnDeleteCustomer').addEventListener('click', () => {
   customerModal.classList.add('hidden');
   renderFollowup();
   renderCustomers();
+});
+
+// ==================================================================
+// OWNERS (مالک‌ها)
+// ==================================================================
+
+const ownerModal = $('#ownerModal');
+function openOwnerModal(id) {
+  const o = id ? owners.find((x) => x.id === id) : null;
+  $('#ownerModalTitle').textContent = o ? 'ویرایش مالک' : 'مالک جدید';
+  $('#oId').value = o ? o.id : '';
+  $('#oName').value = o ? o.name : '';
+  $('#oPhone').value = o ? o.phone || '' : '';
+  $('#oType').value = o ? o.type : 'residential';
+  $('#oPotential').value = o ? o.potential : 'medium';
+  $('#oProperty').value = o ? o.property || '' : '';
+  $('#oPrice').value = o ? o.price || '' : '';
+  $('#oFlexible').value = o ? o.flexible : 'unknown';
+  $('#oFirstContact').value = o ? o.firstContactDate || '' : '';
+  $('#oLastFollowUp').value = o ? o.lastFollowUp || '' : todayStr();
+  $('#oStatus').value = o ? o.status : 'active';
+  $('#oInterested').value = o ? o.interested : 'unknown';
+  $('#oNotes').value = o ? o.notes || '' : '';
+  $('#btnDeleteOwner').classList.toggle('hidden', !o);
+  ownerModal.classList.remove('hidden');
+}
+
+$('#btnAddOwner').addEventListener('click', () => openOwnerModal(null));
+$('#btnCancelOwner').addEventListener('click', () => ownerModal.classList.add('hidden'));
+
+$('#ownerForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const id = $('#oId').value || uid();
+  const existing = owners.find((x) => x.id === id);
+  const data = {
+    id,
+    name: $('#oName').value.trim(),
+    phone: $('#oPhone').value.trim(),
+    type: $('#oType').value,
+    potential: $('#oPotential').value,
+    property: $('#oProperty').value.trim(),
+    price: $('#oPrice').value.trim(),
+    flexible: $('#oFlexible').value,
+    firstContactDate: $('#oFirstContact').value,
+    lastFollowUp: $('#oLastFollowUp').value,
+    status: $('#oStatus').value,
+    interested: $('#oInterested').value,
+    notes: $('#oNotes').value.trim(),
+    lastInsightAppliedAt: existing ? existing.lastInsightAppliedAt : null,
+  };
+  const idx = owners.findIndex((x) => x.id === id);
+  if (idx >= 0) owners[idx] = data; else owners.push(data);
+  persistOwners();
+  ownerModal.classList.add('hidden');
+  renderFollowup();
+  renderOwners();
+});
+
+$('#btnDeleteOwner').addEventListener('click', () => {
+  const id = $('#oId').value;
+  if (!id) return;
+  if (!confirm('این مالک حذف شود؟')) return;
+  owners = owners.filter((x) => x.id !== id);
+  persistOwners();
+  ownerModal.classList.add('hidden');
+  renderFollowup();
+  renderOwners();
 });
 
 // ==================================================================
@@ -573,7 +783,7 @@ $('#btnDeleteListing').addEventListener('click', () => {
 // ==================================================================
 
 $('#btnExport').addEventListener('click', () => {
-  const payload = { customers, projects, listings, exportedAt: new Date().toISOString() };
+  const payload = { customers, owners, projects, listings, exportedAt: new Date().toISOString() };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -590,14 +800,32 @@ $('#importFile').addEventListener('change', async (e) => {
     const payload = JSON.parse(await file.text());
     if (!confirm('این کار داده‌های فعلی را با فایل پشتیبان جایگزین می‌کند. ادامه می‌دهید؟')) return;
     customers = payload.customers || [];
+    owners = payload.owners || [];
     projects = payload.projects || [];
     listings = payload.listings || [];
-    persistCustomers(); persistProjects(); persistListings();
+    persistCustomers(); persistOwners(); persistProjects(); persistListings();
     renderAll();
   } catch {
     alert('فایل پشتیبان معتبر نیست.');
   }
   e.target.value = '';
+});
+
+// خروجی لیست شماره‌ها برای ربات واتساپ متصل به شماره اصلی (whatsapp-bot-clients)
+// این فایل را دانلود و به صورت دستی جای data/contacts.json در ریپازیتوری commit کنید.
+$('#btnExportWatchlist').addEventListener('click', () => {
+  const contacts = [
+    ...customers.filter((c) => c.phone).map((c) => ({ phone: c.phone, name: c.name, role: 'customer' })),
+    ...owners.filter((o) => o.phone).map((o) => ({ phone: o.phone, name: o.name, role: 'owner' })),
+  ];
+  const blob = new Blob([JSON.stringify(contacts, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'contacts.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  alert('فایل contacts.json دانلود شد. آن را جایگزین data/contacts.json در ریپازیتوری گیت‌هاب کنید (راهنما: whatsapp-bot-clients/README.md) تا ربات واتساپ این شماره‌ها را بشناسد.');
 });
 
 // ---------- misc utils ----------
@@ -612,10 +840,12 @@ function escapeHtml(str) {
 function renderAll() {
   renderFollowup();
   renderCustomers();
+  renderOwners();
   renderProjects();
   renderListings();
   populateAssignedSelect();
 }
 
 renderAll();
+loadContactInsights();
 loadAutoProjects();

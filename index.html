@@ -16,12 +16,14 @@
       ورود پشتیبان
       <input type="file" id="importFile" accept="application/json" hidden>
     </label>
+    <button id="btnExportWatchlist" class="btn btn-ghost">خروجی برای ربات واتساپ</button>
   </div>
 </header>
 
 <nav class="tabs">
   <button class="tab-btn active" data-tab="followup">🔔 پیگیری امروز</button>
   <button class="tab-btn" data-tab="customers">👥 مشتری‌ها</button>
+  <button class="tab-btn" data-tab="owners">🔑 مالک‌ها</button>
   <button class="tab-btn" data-tab="projects">🏗️ پروژه‌های پیش‌فروش (ریلی)</button>
   <button class="tab-btn" data-tab="listings">🏠 بازار ثانویه (فایل خودم)</button>
 </nav>
@@ -73,6 +75,39 @@
     </div>
 
     <div id="customerList" class="card-list"></div>
+  </section>
+
+  <!-- OWNERS TAB -->
+  <section id="tab-owners" class="tab-panel">
+    <div class="panel-head">
+      <h2>لیست مالک‌ها</h2>
+      <button id="btnAddOwner" class="btn btn-primary">+ مالک جدید</button>
+    </div>
+    <p class="hint">مالک‌هایی که ملک‌شون رو براشون می‌فروشید یا اجاره می‌دید — جدا از مشتری‌های خریدار.</p>
+
+    <div class="filters">
+      <select id="filterOwnerType">
+        <option value="">همه نوع‌ها</option>
+        <option value="residential">رزیدنشال</option>
+        <option value="commercial">کامرشال</option>
+      </select>
+      <select id="filterOwnerPotential">
+        <option value="">همه پتانسیل‌ها</option>
+        <option value="high">زیاد</option>
+        <option value="medium">متوسط</option>
+        <option value="low">کم</option>
+      </select>
+      <select id="filterOwnerStatus">
+        <option value="">همه وضعیت‌ها</option>
+        <option value="active">فعال / در حال فروش</option>
+        <option value="negotiating">در حال مذاکره</option>
+        <option value="sold">فروخته شد</option>
+        <option value="withdrawn">منصرف شد</option>
+      </select>
+      <input id="filterOwnerSearch" type="text" placeholder="جستجوی نام یا شماره...">
+    </div>
+
+    <div id="ownerList" class="card-list"></div>
   </section>
 
   <!-- PROJECTS TAB -->
@@ -173,6 +208,83 @@
       <div class="modal-actions">
         <button type="button" id="btnDeleteCustomer" class="btn btn-danger hidden">حذف مشتری</button>
         <button type="button" id="btnCancelCustomer" class="btn btn-ghost">انصراف</button>
+        <button type="submit" class="btn btn-primary">ذخیره</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Owner Modal -->
+<div id="ownerModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3 id="ownerModalTitle">مالک جدید</h3>
+    <form id="ownerForm">
+      <input type="hidden" id="oId">
+      <label>نام مالک *
+        <input type="text" id="oName" required>
+      </label>
+      <label>شماره تماس (واتساپ)
+        <input type="text" id="oPhone">
+      </label>
+      <div class="row2">
+        <label>نوع ملک
+          <select id="oType">
+            <option value="residential">رزیدنشال</option>
+            <option value="commercial">کامرشال</option>
+          </select>
+        </label>
+        <label>پتانسیل فروش
+          <select id="oPotential">
+            <option value="high">زیاد (هفتگی)</option>
+            <option value="medium">متوسط (هر ۳ هفته)</option>
+            <option value="low">کم (هر ۶ هفته)</option>
+          </select>
+        </label>
+      </div>
+      <label>توضیح ملک
+        <input type="text" id="oProperty" placeholder="مثلا: آپارتمان ۱۲۰ متری، ونک">
+      </label>
+      <div class="row2">
+        <label>قیمت پیشنهادی مالک
+          <input type="text" id="oPrice">
+        </label>
+        <label>انعطاف روی قیمت؟
+          <select id="oFlexible">
+            <option value="unknown">نامشخص</option>
+            <option value="yes">بله، انعطاف داره</option>
+            <option value="no">خیر، قیمت ثابته</option>
+          </select>
+        </label>
+      </div>
+      <div class="row2">
+        <label>تاریخ اولین تماس
+          <input type="date" id="oFirstContact">
+        </label>
+        <label>تاریخ آخرین فالوآپ
+          <input type="date" id="oLastFollowUp">
+        </label>
+      </div>
+      <label>وضعیت
+        <select id="oStatus">
+          <option value="active">فعال / در حال فروش</option>
+          <option value="negotiating">در حال مذاکره</option>
+          <option value="sold">فروخته شد</option>
+          <option value="withdrawn">منصرف شد</option>
+        </select>
+      </label>
+      <label>علاقه‌مندی (جواب می‌دهد؟)
+        <select id="oInterested">
+          <option value="yes">بله، جواب می‌دهد</option>
+          <option value="no">خیر، جواب نمی‌دهد</option>
+          <option value="unknown">نامشخص</option>
+        </select>
+      </label>
+      <label>یادداشت
+        <textarea id="oNotes" rows="2"></textarea>
+      </label>
+      <div class="modal-actions">
+        <button type="button" id="btnDeleteOwner" class="btn btn-danger hidden">حذف مالک</button>
+        <button type="button" id="btnCancelOwner" class="btn btn-ghost">انصراف</button>
         <button type="submit" class="btn btn-primary">ذخیره</button>
       </div>
     </form>
