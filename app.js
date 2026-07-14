@@ -45,10 +45,45 @@ function saveArr(key, arr) { localStorage.setItem(key, JSON.stringify(arr)); }
 let customers = loadArr(STORAGE_KEYS.customers);
 let projects = loadArr(STORAGE_KEYS.projects);
 let listings = loadArr(STORAGE_KEYS.listings);
+let autoProjects = []; // fetched from data/projects.json (developer news monitor)
 
 const persistCustomers = () => saveArr(STORAGE_KEYS.customers, customers);
 const persistProjects = () => saveArr(STORAGE_KEYS.projects, projects);
 const persistListings = () => saveArr(STORAGE_KEYS.listings, listings);
+
+// ---------- auto-detected developer projects (data/projects.json) ----------
+async function loadAutoProjects() {
+  try {
+    const res = await fetch('data/projects.json', { cache: 'no-store' });
+    if (!res.ok) return;
+    const raw = await res.json();
+    autoProjects = (Array.isArray(raw) ? raw : []).map((p) => ({
+      id: `auto:${p.developer_name}::${p.project_name}`,
+      name: p.project_name,
+      type: p.type === 'commercial' ? 'commercial' : 'residential',
+      status: p.status || '',
+      location: p.location || '',
+      price: p.price_range || '',
+      notes: [p.note, p.event_type ? `(${p.event_type})` : ''].filter(Boolean).join(' '),
+      priority: typeof p.priority === 'number' ? p.priority : 999,
+      developerName: p.developer_name,
+      sourceUrl: p.source_url || '',
+      detectedAt: p.detected_at || '',
+      auto: true,
+    }));
+  } catch {
+    autoProjects = [];
+  }
+  renderProjects();
+  renderFollowup();
+  populateAssignedSelect();
+}
+
+// ترکیب پروژه‌های خودکار (تشخیص‌داده‌شده از سایت سازنده‌ها) با پروژه‌های دستی، مرتب‌شده بر اساس priority سازنده
+function getAllProjects() {
+  const manual = projects.map((p) => ({ ...p, priority: typeof p.priority === 'number' ? p.priority : 999, auto: false }));
+  return [...autoProjects, ...manual].sort((a, b) => a.priority - b.priority);
+}
 
 // ---------- tabs ----------
 $$('.tab-btn').forEach((btn) => {
@@ -69,7 +104,7 @@ $('#todayDate').textContent = new Date().toLocaleDateString('fa-IR', {
 // ==================================================================
 
 function matchingPool(customer) {
-  return customer.subtype === 'presale' ? projects : listings;
+  return customer.subtype === 'presale' ? getAllProjects() : listings;
 }
 
 function suggestMatch(customer) {
@@ -202,11 +237,11 @@ const customerModal = $('#customerModal');
 
 function populateAssignedSelect() {
   const subtype = $('#cSubtype').value;
-  const pool = subtype === 'presale' ? projects : listings;
+  const pool = subtype === 'presale' ? getAllProjects() : listings;
   const select = $('#cAssigned');
   const current = select.value;
   select.innerHTML = '<option value="">— بدون تخصیص (پیشنهاد خودکار) —</option>' +
-    pool.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+    pool.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}${p.auto ? ' 🤖' : ''}</option>`).join('');
   if (pool.some((p) => p.id === current)) select.value = current;
 }
 $('#cSubtype').addEventListener('change', populateAssignedSelect);
@@ -398,22 +433,26 @@ $('#chatFile').addEventListener('change', async (e) => {
 function renderProjects() {
   const container = $('#projectList');
   container.innerHTML = '';
-  if (projects.length === 0) {
+  const all = getAllProjects();
+  if (all.length === 0) {
     container.innerHTML = '<div class="empty-state">هنوز پروژه‌ای ثبت نشده.</div>';
     return;
   }
-  projects.forEach((p) => {
+  all.forEach((p) => {
     const card = document.createElement('div');
     card.className = 'card';
+    const statusBadge = p.auto ? escapeHtml(p.status || '—') : (p.status === 'soldout' ? 'تکمیل ظرفیت' : 'فعال');
     card.innerHTML = `
       <div class="card-top">
         <div>
-          <div class="card-name">${escapeHtml(p.name)}</div>
-          <div class="card-sub">${LABELS.type[p.type]} ${p.location ? '· ' + escapeHtml(p.location) : ''} ${p.price ? '· ' + escapeHtml(p.price) : ''}</div>
-          <div class="badges"><span class="badge">${p.status === 'soldout' ? 'تکمیل ظرفیت' : 'فعال'}</span></div>
+          <div class="card-name">${escapeHtml(p.name)} ${p.auto ? '<span class="card-sub">🤖 خودکار — از سایت ' + escapeHtml(p.developerName || '') + '</span>' : ''}</div>
+          <div class="card-sub">${LABELS.type[p.type]} ${p.location ? '· ' + escapeHtml(p.location) : ''} ${p.price ? '· ' + escapeHtml(p.price) : ''} ${p.auto ? '· اولویت سازنده ' + p.priority : ''}</div>
+          <div class="badges"><span class="badge">${statusBadge}</span></div>
         </div>
         <div class="card-actions">
-          <button class="btn btn-ghost btn-sm" data-action="edit-project" data-id="${p.id}">ویرایش</button>
+          ${p.auto
+            ? (p.sourceUrl ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(p.sourceUrl)}" target="_blank" rel="noopener">منبع</a>` : '')
+            : `<button class="btn btn-ghost btn-sm" data-action="edit-project" data-id="${p.id}">ویرایش</button>`}
         </div>
       </div>
       ${p.notes ? `<div class="followup-suggestion">${escapeHtml(p.notes)}</div>` : ''}
@@ -579,3 +618,4 @@ function renderAll() {
 }
 
 renderAll();
+loadAutoProjects();

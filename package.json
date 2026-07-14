@@ -1,0 +1,13 @@
+{
+  "name": "client-tracker-monitor",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Automated developer news monitor for the WhatsApp client tracker",
+  "type": "commonjs",
+  "scripts": {
+    "monitor": "node scripts/monitor-websites.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.70.0"
+  }
+}
