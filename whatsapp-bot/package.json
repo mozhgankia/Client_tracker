@@ -1,0 +1,16 @@
+{
+  "name": "client-tracker-whatsapp-bot",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Live WhatsApp group listener that extracts developer project news and pushes it to data/projects.json",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.111.0",
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^7.0.0-rc13",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
