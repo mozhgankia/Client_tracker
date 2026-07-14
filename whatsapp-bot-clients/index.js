@@ -1,8 +1,12 @@
-// Persistent WhatsApp listener on your MAIN number: watches 1-1 chats with
-// contacts already registered as customers/owners in data/contacts.json
-// (exported from the tracker web app), and pushes potential/interest
-// suggestions to data/contact-insights.json. It never analyzes or stores
-// messages from numbers that aren't on the watchlist.
+// Persistent WhatsApp listener on your MAIN number: reads ALL 1-1 chats
+// EXCEPT the numbers listed in config/excluded-numbers.json. For numbers
+// already known (customers, or property owners attached to a listing —
+// both exported from the app into data/contacts.json), it updates
+// data/contact-insights.json. For unknown numbers, it asks Claude whether
+// the conversation looks like a real-estate customer or property-owner
+// lead; if so it's written to data/new-leads.json for you to review and
+// add in the app. Anything judged irrelevant (personal chats, etc.) is
+// never stored anywhere.
 'use strict';
 
 const fs = require('fs');
@@ -41,7 +45,8 @@ const GIT_REMOTE_URL = `https://x-access-token:${process.env.GITHUB_TOKEN}@githu
 
 const client = new Anthropic();
 
-const INSIGHT_SCHEMA = {
+// برای مخاطب‌های شناخته‌شده (مشتری) — فقط پتانسیل/علاقه‌مندی
+const CUSTOMER_INSIGHT_SCHEMA = {
   type: 'object',
   properties: {
     suggested_potential: { type: 'string', enum: ['high', 'medium', 'low'] },
@@ -49,6 +54,20 @@ const INSIGHT_SCHEMA = {
     note: { type: 'string', description: 'خلاصه یک جمله‌ای از وضعیت فعلی این مخاطب بر اساس پیام‌های اخیر' },
   },
   required: ['suggested_potential', 'suggested_interested', 'note'],
+  additionalProperties: false,
+};
+
+// برای مخاطب‌های ناشناس — اول باید تشخیص بدیم اصلاً مرتبط با کار املاک هست یا نه
+const LEAD_CLASSIFICATION_SCHEMA = {
+  type: 'object',
+  properties: {
+    is_relevant: { type: 'boolean', description: 'آیا این گفتگو نشان می‌دهد طرف مخاطب یک مشتری بالقوه خرید ملک یا مالک ملکی است که ممکن است بخواهد بفروشد؟' },
+    role: { type: 'string', enum: ['customer', 'owner', 'not_relevant'] },
+    suggested_potential: { type: 'string', enum: ['high', 'medium', 'low'] },
+    property_hint: { type: 'string', description: 'اگر role=owner است، توضیح مختصر ملکی که مالک از آن صحبت کرده؛ در غیر این صورت رشته خالی' },
+    note: { type: 'string', description: 'یک جمله خلاصه از چرایی این تشخیص' },
+  },
+  required: ['is_relevant', 'role', 'suggested_potential', 'property_hint', 'note'],
   additionalProperties: false,
 };
 
@@ -97,16 +116,22 @@ function normalizePhone(phone) {
   return String(phone || '').replace(/\D/g, '').slice(-10);
 }
 
-function loadWatchlist() {
+function loadExcludedNumbers() {
+  const config = loadJson(path.join(DATA_REPO_DIR, 'config', 'excluded-numbers.json'), { numbers: [] });
+  const numbers = Array.isArray(config.numbers) ? config.numbers : [];
+  return new Set(numbers.map(normalizePhone));
+}
+
+function loadKnownContacts() {
   const contacts = loadJson(path.join(DATA_REPO_DIR, 'data', 'contacts.json'), []);
   return Array.isArray(contacts) ? contacts : [];
 }
 
-let pendingChanges = false;
+let pendingChanges = new Set(); // relative file paths with pending changes
 let syncTimer = null;
 
-function scheduleSync() {
-  pendingChanges = true;
+function scheduleSync(relativeFilePath) {
+  pendingChanges.add(relativeFilePath);
   if (syncTimer) return;
   syncTimer = setTimeout(() => {
     syncTimer = null;
@@ -115,8 +140,9 @@ function scheduleSync() {
 }
 
 async function syncToRepo() {
-  if (!pendingChanges) return;
-  pendingChanges = false;
+  if (pendingChanges.size === 0) return;
+  const files = Array.from(pendingChanges);
+  pendingChanges = new Set();
 
   try {
     git(['pull', '--rebase', 'origin', GIT_BRANCH]);
@@ -124,7 +150,7 @@ async function syncToRepo() {
     console.warn('git pull قبل از push ناموفق بود:', err.message);
   }
 
-  git(['add', 'data/contact-insights.json']);
+  git(['add', ...files]);
   let status;
   try {
     status = git(['status', '--porcelain']);
@@ -150,29 +176,23 @@ async function syncToRepo() {
 
 // ---------- Claude analysis ----------
 
-async function analyzeContact(role, name, transcriptLines) {
-  const roleLabel = role === 'owner' ? 'مالک ملک' : 'مشتری خریدار';
+async function analyzeCustomer(name, transcriptLines) {
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 1024,
-    output_config: { format: { type: 'json_schema', schema: INSIGHT_SCHEMA } },
+    output_config: { format: { type: 'json_schema', schema: CUSTOMER_INSIGHT_SCHEMA } },
     messages: [
       {
         role: 'user',
         content:
-          `شما دستیار یک مشاور املاک هستید. متن زیر چند پیام اخیر واتساپ بین مشاور و «${name}» ` +
-          `(${roleLabel}) است. «من:» یعنی پیام از طرف مشاور، بقیه خطوط پیام‌های خود ${roleLabel} است.\n\n` +
-          `بر اساس این گفتگو:\n` +
-          (role === 'owner'
-            ? '- suggested_potential: احتمال اینکه این مالک واقعاً ملکش را از طریق مشاور بفروشد (زیاد/متوسط/کم)\n'
-            : '- suggested_potential: احتمال خرید این مشتری (زیاد/متوسط/کم)\n') +
-          `- suggested_interested: آیا این مخاطب معمولاً به پیام‌ها جواب می‌دهد؟\n` +
-          `- note: یک جمله خلاصه از وضعیت فعلی.\n\n` +
+          `شما دستیار یک مشاور املاک هستید. متن زیر چند پیام اخیر واتساپ بین مشاور و مشتری «${name}» است. ` +
+          `«من:» یعنی پیام از طرف مشاور، بقیه خطوط پیام‌های خود مشتری است.\n\n` +
+          `بر اساس این گفتگو:\n- suggested_potential: احتمال خرید این مشتری (زیاد/متوسط/کم)\n` +
+          `- suggested_interested: آیا این مخاطب معمولاً به پیام‌ها جواب می‌دهد؟\n- note: یک جمله خلاصه از وضعیت فعلی.\n\n` +
           `گفتگو:\n"""\n${transcriptLines.join('\n')}\n"""`,
       },
     ],
   });
-
   if (response.stop_reason === 'refusal') return null;
   const textBlock = response.content.find((b) => b.type === 'text');
   if (!textBlock) return null;
@@ -183,21 +203,39 @@ async function analyzeContact(role, name, transcriptLines) {
   }
 }
 
-function upsertInsight(existing, phone, role, analysis, lastMessageAt, lastMessagePreview, firstSeenAt) {
+async function classifyUnknownContact(name, transcriptLines) {
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 1024,
+    output_config: { format: { type: 'json_schema', schema: LEAD_CLASSIFICATION_SCHEMA } },
+    messages: [
+      {
+        role: 'user',
+        content:
+          `شما دستیار یک مشاور املاک هستید. متن زیر چند پیام اخیر واتساپ بین مشاور و «${name}» است — ` +
+          `کسی که هنوز در سیستم مشتری‌ها یا فایل ملک‌ها ثبت نشده. «من:» یعنی پیام از طرف مشاور.\n\n` +
+          `تشخیص بده آیا این گفتگو واقعاً مرتبط با کار املاک است (کسی که دنبال خرید ملک است، یا مالک ملکی است که ` +
+          `ممکن است بخواهد بفروشد) یا کاملاً شخصی/بی‌ربط است (خانواده، دوستان، کار دیگر، تبلیغات و...). ` +
+          `اگر مطمئن نیستید یا سرنخ کافی نیست، is_relevant را false بگذارید — فقط در صورت وجود سرنخ روشن true بزنید.\n\n` +
+          `گفتگو:\n"""\n${transcriptLines.join('\n')}\n"""`,
+      },
+    ],
+  });
+  if (response.stop_reason === 'refusal') return null;
+  const textBlock = response.content.find((b) => b.type === 'text');
+  if (!textBlock) return null;
+  try {
+    return JSON.parse(textBlock.text);
+  } catch {
+    return null;
+  }
+}
+
+function upsertByPhone(existing, phone, buildEntry) {
   const normalized = normalizePhone(phone);
   const byPhone = new Map(existing.map((i) => [normalizePhone(i.phone), i]));
   const prior = byPhone.get(normalized);
-  byPhone.set(normalized, {
-    phone,
-    role,
-    suggested_potential: analysis.suggested_potential,
-    suggested_interested: analysis.suggested_interested,
-    note: analysis.note,
-    last_message_at: lastMessageAt,
-    last_message_preview: lastMessagePreview,
-    first_seen_at: (prior && prior.first_seen_at) || firstSeenAt,
-    updated_at: new Date().toISOString(),
-  });
+  byPhone.set(normalized, buildEntry(prior));
   return Array.from(byPhone.values());
 }
 
@@ -219,53 +257,85 @@ function extractText(message) {
 const buffers = new Map(); // jid -> [{ fromMe, text, at }]
 const analysisTimers = new Map(); // jid -> Timeout
 
-function scheduleAnalysis(jid, contact) {
+function scheduleAnalysis(jid, name) {
   if (analysisTimers.has(jid)) clearTimeout(analysisTimers.get(jid));
   analysisTimers.set(
     jid,
     setTimeout(() => {
       analysisTimers.delete(jid);
-      runAnalysis(jid, contact).catch((err) => console.error('تحلیل مخاطب ناموفق بود:', err.message));
+      runAnalysis(jid, name).catch((err) => console.error('تحلیل مخاطب ناموفق بود:', err.message));
     }, ANALYSIS_DEBOUNCE_MS)
   );
 }
 
-async function runAnalysis(jid, contact) {
+async function runAnalysis(jid, name) {
   const buffer = buffers.get(jid) || [];
   if (buffer.length === 0) return;
 
-  const transcriptLines = buffer.map((m) => `${m.fromMe ? 'من' : contact.name}: ${m.text}`);
+  const phone = jid.split('@')[0];
+  const normalized = normalizePhone(phone);
+  const known = loadKnownContacts();
+  const match = known.find((c) => normalizePhone(c.phone) === normalized);
+
+  const transcriptLines = buffer.map((m) => `${m.fromMe ? 'من' : name}: ${m.text}`);
   const incoming = buffer.filter((m) => !m.fromMe);
   const lastIncoming = incoming[incoming.length - 1];
   const lastAny = buffer[buffer.length - 1];
 
-  const analysis = await analyzeContact(contact.role, contact.name, transcriptLines);
-  if (!analysis) return;
+  if (match && match.role === 'owner') {
+    // مالک‌های ثبت‌شده روی یک ملک نیازی به تحلیل رفتاری ندارند — نادیده گرفته می‌شود
+    return;
+  }
 
-  const insightsPath = path.join(DATA_REPO_DIR, 'data', 'contact-insights.json');
-  let insights = loadJson(insightsPath, []);
-  if (!Array.isArray(insights)) insights = [];
+  if (match && match.role === 'customer') {
+    const analysis = await analyzeCustomer(match.name || name, transcriptLines);
+    if (!analysis) return;
+    const insightsPath = path.join(DATA_REPO_DIR, 'data', 'contact-insights.json');
+    let insights = loadJson(insightsPath, []);
+    if (!Array.isArray(insights)) insights = [];
+    insights = upsertByPhone(insights, phone, () => ({
+      phone,
+      suggested_potential: analysis.suggested_potential,
+      suggested_interested: analysis.suggested_interested,
+      note: analysis.note,
+      last_message_at: lastAny.at,
+      last_message_preview: lastIncoming ? lastIncoming.text.slice(0, 200) : '',
+      updated_at: new Date().toISOString(),
+    }));
+    saveJson(insightsPath, insights);
+    console.log(`+ پیشنهاد برای مشتری «${match.name || name}» ثبت شد.`);
+    scheduleSync('data/contact-insights.json');
+    return;
+  }
 
-  insights = upsertInsight(
-    insights,
-    contact.phone,
-    contact.role,
-    analysis,
-    lastAny.at,
-    lastIncoming ? lastIncoming.text.slice(0, 200) : '',
-    buffer[0].at
-  );
-  saveJson(insightsPath, insights);
-  console.log(`+ پیشنهاد برای «${contact.name}» (${contact.role === 'owner' ? 'مالک' : 'مشتری'}) ثبت شد.`);
-  scheduleSync();
+  // مخاطب ناشناس — اول باید بفهمیم اصلاً مرتبطه یا نه
+  const classification = await classifyUnknownContact(name, transcriptLines);
+  if (!classification || !classification.is_relevant || classification.role === 'not_relevant') return;
+
+  const leadsPath = path.join(DATA_REPO_DIR, 'data', 'new-leads.json');
+  let leads = loadJson(leadsPath, []);
+  if (!Array.isArray(leads)) leads = [];
+  leads = upsertByPhone(leads, phone, (prior) => ({
+    phone,
+    name,
+    role: classification.role,
+    suggested_potential: classification.suggested_potential,
+    property_hint: classification.property_hint,
+    note: classification.note,
+    first_seen_at: (prior && prior.first_seen_at) || lastAny.at,
+    updated_at: new Date().toISOString(),
+  }));
+  saveJson(leadsPath, leads);
+  console.log(`+ مخاطب تازه (${classification.role === 'owner' ? 'احتمالا مالک' : 'احتمالا مشتری'}) «${name}» ثبت شد.`);
+  scheduleSync('data/new-leads.json');
 }
 
-function handleWatchedMessage(jid, contact, fromMe, text, timestampMs) {
+function handleMessage(jid, name, fromMe, text, timestampMs) {
   const buffer = buffers.get(jid) || [];
   buffer.push({ fromMe, text, at: new Date(timestampMs).toISOString() });
   while (buffer.length > MAX_BUFFER_MESSAGES) buffer.shift();
   buffers.set(jid, buffer);
-  scheduleAnalysis(jid, contact);
+  scheduleAnalysis(jid, name);
 }
 
 // ---------- WhatsApp connection ----------
@@ -297,28 +367,28 @@ async function startBot() {
       console.log('اتصال قطع شد.', shouldReconnect ? 'در حال تلاش مجدد...' : 'خروج کامل — پوشه auth_info را پاک کنید و دوباره QR بزنید.');
       if (shouldReconnect) setTimeout(startBot, 3000);
     } else if (connection === 'open') {
-      console.log('✅ به واتساپ وصل شد. در حال گوش دادن به چت‌های شماره‌های ثبت‌شده...');
+      console.log('✅ به واتساپ وصل شد. در حال گوش دادن به چت‌ها (به‌جز شماره‌های حذف‌شده)...');
     }
   });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
+    const excluded = loadExcludedNumbers();
     for (const msg of messages) {
       if (!msg.message) continue;
       const jid = msg.key.remoteJid;
       if (!jid || !jid.endsWith('@s.whatsapp.net')) continue; // فقط چت‌های شخصی، نه گروه‌ها
 
+      const phoneFromJid = jid.split('@')[0];
+      if (excluded.has(normalizePhone(phoneFromJid))) continue; // شماره‌ای که باید کاملاً نادیده گرفته بشه
+
       const text = extractText(msg);
       if (!text.trim()) continue;
 
-      const phoneFromJid = jid.split('@')[0];
-      const watchlist = loadWatchlist();
-      const contact = watchlist.find((c) => normalizePhone(c.phone) === normalizePhone(phoneFromJid));
-      if (!contact) continue; // فقط شماره‌های ثبت‌شده در data/contacts.json بررسی می‌شن
-
+      const name = msg.pushName || phoneFromJid;
       const timestampMs = (Number(msg.messageTimestamp) || Date.now() / 1000) * 1000;
       try {
-        handleWatchedMessage(jid, contact, !!msg.key.fromMe, text, timestampMs);
+        handleMessage(jid, name, !!msg.key.fromMe, text, timestampMs);
       } catch (err) {
         console.error('خطا در پردازش پیام:', err.message);
       }

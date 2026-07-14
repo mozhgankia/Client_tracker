@@ -4,7 +4,6 @@
 
 const STORAGE_KEYS = {
   customers: 'wct_customers',
-  owners: 'wct_owners',
   projects: 'wct_projects',
   listings: 'wct_listings',
 };
@@ -22,13 +21,7 @@ const LABELS = {
     multiplePurchases: 'چند خرید داشته',
     purchasedElsewhere: 'با کس دیگه خرید کرده',
   },
-  ownerStatus: {
-    active: 'فعال / در حال فروش',
-    negotiating: 'در حال مذاکره',
-    sold: 'فروخته شد',
-    withdrawn: 'منصرف شد',
-  },
-  flexible: { yes: 'انعطاف داره', no: 'قیمت ثابت', unknown: 'نامشخص' },
+  contactPlatform: { whatsapp: 'واتساپ', telegram: 'تلگرام' },
   interested: { yes: 'پاسخگو', no: 'بی‌پاسخ', unknown: 'نامشخص' },
 };
 
@@ -57,16 +50,17 @@ function normalizePhone(phone) {
 }
 
 let customers = loadArr(STORAGE_KEYS.customers);
-let owners = loadArr(STORAGE_KEYS.owners);
 let projects = loadArr(STORAGE_KEYS.projects);
 let listings = loadArr(STORAGE_KEYS.listings);
 let autoProjects = []; // fetched from data/projects.json (developer news monitor)
 let contactInsights = []; // fetched from data/contact-insights.json (WhatsApp main-number bot)
+let newLeads = []; // fetched from data/new-leads.json (contacts detected by the WhatsApp bot, not yet in the tracker)
+const dismissedLeads = new Set(loadArr('wct_dismissed_leads'));
 
 const persistCustomers = () => saveArr(STORAGE_KEYS.customers, customers);
-const persistOwners = () => saveArr(STORAGE_KEYS.owners, owners);
 const persistProjects = () => saveArr(STORAGE_KEYS.projects, projects);
 const persistListings = () => saveArr(STORAGE_KEYS.listings, listings);
+const persistDismissedLeads = () => saveArr('wct_dismissed_leads', Array.from(dismissedLeads));
 
 // ---------- زنده از ربات واتساپ متصل به شماره اصلی (data/contact-insights.json) ----------
 async function loadContactInsights() {
@@ -79,13 +73,64 @@ async function loadContactInsights() {
     contactInsights = [];
   }
   renderCustomers();
-  renderOwners();
 }
 
 function findInsightFor(record) {
   const phone = normalizePhone(record.phone);
   if (!phone) return null;
   return contactInsights.find((i) => normalizePhone(i.phone) === phone) || null;
+}
+
+// ---------- مخاطب‌های تازه‌کشف‌شده توسط ربات واتساپ (data/new-leads.json) ----------
+async function loadNewLeads() {
+  try {
+    const res = await fetch('data/new-leads.json', { cache: 'no-store' });
+    if (!res.ok) return;
+    const raw = await res.json();
+    newLeads = Array.isArray(raw) ? raw : [];
+  } catch {
+    newLeads = [];
+  }
+  renderNewLeads();
+}
+
+function renderNewLeads() {
+  const container = $('#newLeadsList');
+  const knownPhones = new Set([
+    ...customers.map((c) => normalizePhone(c.phone)),
+    ...listings.map((l) => normalizePhone(l.ownerPhone)),
+  ]);
+  const visible = newLeads.filter((l) => {
+    const phone = normalizePhone(l.phone);
+    return phone && !knownPhones.has(phone) && !dismissedLeads.has(phone);
+  });
+
+  if (visible.length === 0) {
+    container.innerHTML = '';
+    container.classList.add('hidden');
+    return;
+  }
+  container.classList.remove('hidden');
+  container.innerHTML = `<div class="panel-head"><h2>🤖 مخاطب‌های تازه (از واتساپ)</h2></div>` +
+    visible.map((l) => `
+      <div class="card">
+        <div class="card-top">
+          <div>
+            <div class="card-name">${escapeHtml(l.name || l.phone)} <span class="card-sub">(${escapeHtml(l.phone)})</span></div>
+            <div class="card-sub">${l.note ? escapeHtml(l.note) : ''}</div>
+            <div class="badges">
+              <span class="badge">${l.role === 'owner' ? 'احتمالا مالک' : 'احتمالا مشتری'}</span>
+              ${l.suggested_potential ? `<span class="badge ${l.suggested_potential}">پتانسیل ${LABELS.potential[l.suggested_potential]}</span>` : ''}
+            </div>
+          </div>
+          <div class="card-actions">
+            <button class="btn btn-primary btn-sm" data-action="lead-add-customer" data-id="${escapeHtml(l.phone)}">+ مشتری</button>
+            <button class="btn btn-primary btn-sm" data-action="lead-add-listing" data-id="${escapeHtml(l.phone)}">+ ملک (بازار ثانویه)</button>
+            <button class="btn btn-ghost btn-sm" data-action="lead-dismiss" data-id="${escapeHtml(l.phone)}">نادیده بگیر</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
 }
 
 // ---------- auto-detected developer projects (data/projects.json) ----------
@@ -153,64 +198,49 @@ function suggestMatch(customer) {
   return pool.find((p) => p.type === customer.type && p.status !== 'soldout') || null;
 }
 
-function dueList(records, excludeStatuses) {
-  return records
-    .filter((r) => !excludeStatuses.includes(r.status))
-    .map((r) => {
-      const interval = POTENTIAL_INTERVAL_DAYS[r.potential] || 21;
-      const lastRef = r.lastFollowUp || r.firstMessageDate || r.firstContactDate;
-      const daysSince = lastRef ? daysBetween(lastRef, todayStr()) : Infinity;
-      return { r, interval, daysSince, overdueBy: daysSince - interval };
-    })
-    .filter((x) => x.daysSince >= x.interval);
-}
-
 function renderFollowup() {
   const container = $('#followupList');
   container.innerHTML = '';
 
-  const dueCustomers = dueList(customers, ['purchasedElsewhere']).map((x) => ({ ...x, kind: 'customer' }));
-  const dueOwners = dueList(owners, ['sold', 'withdrawn']).map((x) => ({ ...x, kind: 'owner' }));
-  const due = [...dueCustomers, ...dueOwners].sort((a, b) => b.overdueBy - a.overdueBy);
+  const due = customers
+    .filter((c) => c.status !== 'purchasedElsewhere')
+    .map((c) => {
+      const interval = POTENTIAL_INTERVAL_DAYS[c.potential] || 21;
+      const lastRef = c.lastFollowUp || c.firstMessageDate;
+      const daysSince = lastRef ? daysBetween(lastRef, todayStr()) : Infinity;
+      return { c, interval, daysSince, overdueBy: daysSince - interval };
+    })
+    .filter((x) => x.daysSince >= x.interval)
+    .sort((a, b) => b.overdueBy - a.overdueBy);
 
   if (due.length === 0) {
-    container.innerHTML = '<div class="empty-state">امروز هیچ مشتری یا مالکی برای پیام دادن سررسید نشده 🎉</div>';
+    container.innerHTML = '<div class="empty-state">امروز هیچ مشتری‌ای برای پیام دادن سررسید نشده 🎉</div>';
     return;
   }
 
-  due.forEach(({ r, daysSince, kind }) => {
+  due.forEach(({ c, daysSince }) => {
+    const suggestion = suggestMatch(c);
     const card = document.createElement('div');
     card.className = 'card';
-    const kindBadge = kind === 'owner' ? '<span class="badge">🔑 مالک</span>' : '<span class="badge">👥 مشتری</span>';
-    let suggestionHtml = '';
-    if (kind === 'customer') {
-      const suggestion = suggestMatch(r);
-      suggestionHtml = suggestion
-        ? `<div class="followup-suggestion">📎 پیشنهاد ${r.subtype === 'presale' ? 'پروژه' : 'ملک'}: <strong>${escapeHtml(suggestion.name)}</strong> ${suggestion.location ? `— ${escapeHtml(suggestion.location)}` : ''}</div>`
-        : `<div class="followup-suggestion">هنوز ${r.subtype === 'presale' ? 'پروژه‌ای در بخش پیش‌فروش' : 'ملکی در فایل بازار ثانویه'} برای پیشنهاد ثبت نشده.</div>`;
-    }
-    const subLine = kind === 'owner'
-      ? `${LABELS.type[r.type]} · ${daysSince === Infinity ? 'بدون فالوآپ قبلی' : `${daysSince} روز از آخرین فالوآپ`}`
-      : `${LABELS.type[r.type]} · ${LABELS.subtype[r.subtype]} · ${daysSince === Infinity ? 'بدون فالوآپ قبلی' : `${daysSince} روز از آخرین فالوآپ`}`;
-    const statusLabel = kind === 'owner' ? LABELS.ownerStatus[r.status] : LABELS.status[r.status];
     card.innerHTML = `
       <div class="card-top">
         <div>
-          <div class="card-name">${escapeHtml(r.name)} ${r.phone ? `<span class="card-sub">(${escapeHtml(r.phone)})</span>` : ''}</div>
-          <div class="card-sub">${subLine}</div>
+          <div class="card-name">${escapeHtml(c.name)} ${c.phone ? `<span class="card-sub">(${escapeHtml(c.phone)})</span>` : ''}</div>
+          <div class="card-sub">${LABELS.type[c.type]} · ${LABELS.subtype[c.subtype]} · ${daysSince === Infinity ? 'بدون فالوآپ قبلی' : `${daysSince} روز از آخرین فالوآپ`}</div>
           <div class="badges">
-            ${kindBadge}
-            <span class="badge ${r.potential}">پتانسیل ${LABELS.potential[r.potential]}</span>
+            <span class="badge ${c.potential}">پتانسیل ${LABELS.potential[c.potential]}</span>
             <span class="badge overdue">سررسید پیام</span>
-            <span class="badge">${statusLabel}</span>
+            <span class="badge">${LABELS.status[c.status]}</span>
           </div>
         </div>
         <div class="card-actions">
-          <button class="btn btn-primary btn-sm" data-action="${kind === 'owner' ? 'mark-followup-owner' : 'mark-followup'}" data-id="${r.id}">ثبت پیام امروز</button>
-          <button class="btn btn-ghost btn-sm" data-action="${kind === 'owner' ? 'edit-owner' : 'edit-customer'}" data-id="${r.id}">جزئیات</button>
+          <button class="btn btn-primary btn-sm" data-action="mark-followup" data-id="${c.id}">ثبت پیام امروز</button>
+          <button class="btn btn-ghost btn-sm" data-action="edit-customer" data-id="${c.id}">جزئیات</button>
         </div>
       </div>
-      ${suggestionHtml}
+      ${suggestion
+        ? `<div class="followup-suggestion">📎 پیشنهاد ${c.subtype === 'presale' ? 'پروژه' : 'ملک'}: <strong>${escapeHtml(suggestion.name)}</strong> ${suggestion.location ? `— ${escapeHtml(suggestion.location)}` : ''}</div>`
+        : `<div class="followup-suggestion">هنوز ${c.subtype === 'presale' ? 'پروژه‌ای در بخش پیش‌فروش' : 'ملکی در فایل بازار ثانویه'} برای پیشنهاد ثبت نشده.</div>`}
     `;
     container.appendChild(card);
   });
@@ -288,60 +318,6 @@ function renderCustomers() {
   $(`#${id}`).addEventListener('input', renderCustomers);
 });
 
-function renderOwners() {
-  const container = $('#ownerList');
-  const fType = $('#filterOwnerType').value;
-  const fPotential = $('#filterOwnerPotential').value;
-  const fStatus = $('#filterOwnerStatus').value;
-  const fSearch = $('#filterOwnerSearch').value.trim().toLowerCase();
-
-  const filtered = owners.filter((o) =>
-    (!fType || o.type === fType) &&
-    (!fPotential || o.potential === fPotential) &&
-    (!fStatus || o.status === fStatus) &&
-    (!fSearch || o.name.toLowerCase().includes(fSearch) || (o.phone || '').includes(fSearch))
-  );
-
-  container.innerHTML = '';
-  if (filtered.length === 0) {
-    container.innerHTML = '<div class="empty-state">مالکی یافت نشد. یک مالک جدید اضافه کنید.</div>';
-    return;
-  }
-
-  filtered.forEach((o) => {
-    const card = document.createElement('div');
-    card.className = 'card';
-    card.innerHTML = `
-      <div class="card-top">
-        <div>
-          <div class="card-name">${escapeHtml(o.name)} ${o.phone ? `<span class="card-sub">(${escapeHtml(o.phone)})</span>` : ''}</div>
-          <div class="card-sub">
-            ${o.property ? escapeHtml(o.property) + ' · ' : ''}${o.price ? 'قیمت پیشنهادی: ' + escapeHtml(o.price) : ''}
-          </div>
-          <div class="card-sub">آخرین فالوآپ: ${o.lastFollowUp ? toFa(o.lastFollowUp) : '—'}</div>
-          <div class="badges">
-            <span class="badge">${LABELS.type[o.type]}</span>
-            <span class="badge ${o.potential}">${LABELS.potential[o.potential]}</span>
-            <span class="badge">${LABELS.ownerStatus[o.status]}</span>
-            <span class="badge">${LABELS.flexible[o.flexible]}</span>
-            <span class="badge">${LABELS.interested[o.interested]}</span>
-          </div>
-        </div>
-        <div class="card-actions">
-          <button class="btn btn-ghost btn-sm" data-action="edit-owner" data-id="${o.id}">ویرایش</button>
-        </div>
-      </div>
-      ${o.notes ? `<div class="followup-suggestion">${escapeHtml(o.notes)}</div>` : ''}
-      ${renderInsightBanner(o, 'owner')}
-    `;
-    container.appendChild(card);
-  });
-}
-
-['filterOwnerType', 'filterOwnerPotential', 'filterOwnerStatus', 'filterOwnerSearch'].forEach((id) => {
-  $(`#${id}`).addEventListener('input', renderOwners);
-});
-
 document.body.addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-action]');
   if (!btn) return;
@@ -351,19 +327,20 @@ document.body.addEventListener('click', (e) => {
     const c = customers.find((x) => x.id === id);
     if (c) { c.lastFollowUp = todayStr(); persistCustomers(); renderFollowup(); renderCustomers(); }
   }
-  if (action === 'edit-owner') openOwnerModal(id);
-  if (action === 'mark-followup-owner') {
-    const o = owners.find((x) => x.id === id);
-    if (o) { o.lastFollowUp = todayStr(); persistOwners(); renderFollowup(); renderOwners(); }
-  }
   if (action === 'apply-insight') applyInsight(kind, id);
   if (action === 'edit-project') openProjectModal(id);
   if (action === 'edit-listing') openListingModal(id);
+  if (action === 'lead-add-customer') { openCustomerModal(null); prefillFromLead(id, 'customer'); }
+  if (action === 'lead-add-listing') { openListingModal(null); prefillFromLead(id, 'owner'); }
+  if (action === 'lead-dismiss') {
+    dismissedLeads.add(normalizePhone(id));
+    persistDismissedLeads();
+    renderNewLeads();
+  }
 });
 
 function applyInsight(kind, id) {
-  const list = kind === 'owner' ? owners : customers;
-  const record = list.find((x) => x.id === id);
+  const record = customers.find((x) => x.id === id);
   if (!record) return;
   const insight = findInsightFor(record);
   if (!insight) return;
@@ -371,8 +348,24 @@ function applyInsight(kind, id) {
   if (insight.suggested_interested && insight.suggested_interested !== 'unknown') record.interested = insight.suggested_interested;
   if (insight.last_message_at) record.lastFollowUp = insight.last_message_at.slice(0, 10);
   record.lastInsightAppliedAt = insight.updated_at;
-  if (kind === 'owner') { persistOwners(); renderOwners(); } else { persistCustomers(); renderCustomers(); }
+  persistCustomers();
+  renderCustomers();
   renderFollowup();
+}
+
+function prefillFromLead(phone, kind) {
+  const lead = newLeads.find((l) => normalizePhone(l.phone) === normalizePhone(phone));
+  if (!lead) return;
+  if (kind === 'customer') {
+    $('#cName').value = lead.name || '';
+    $('#cPhone').value = lead.phone || '';
+    if (lead.suggested_potential) $('#cPotential').value = lead.suggested_potential;
+    if (lead.note) $('#cNotes').value = lead.note;
+  } else {
+    $('#lName').value = lead.property_hint || lead.name || '';
+    $('#lOwnerPhone').value = lead.phone || '';
+    if (lead.note) $('#lNotes').value = lead.note;
+  }
 }
 
 // ---------- Customer modal ----------
@@ -448,73 +441,6 @@ $('#btnDeleteCustomer').addEventListener('click', () => {
   customerModal.classList.add('hidden');
   renderFollowup();
   renderCustomers();
-});
-
-// ==================================================================
-// OWNERS (مالک‌ها)
-// ==================================================================
-
-const ownerModal = $('#ownerModal');
-function openOwnerModal(id) {
-  const o = id ? owners.find((x) => x.id === id) : null;
-  $('#ownerModalTitle').textContent = o ? 'ویرایش مالک' : 'مالک جدید';
-  $('#oId').value = o ? o.id : '';
-  $('#oName').value = o ? o.name : '';
-  $('#oPhone').value = o ? o.phone || '' : '';
-  $('#oType').value = o ? o.type : 'residential';
-  $('#oPotential').value = o ? o.potential : 'medium';
-  $('#oProperty').value = o ? o.property || '' : '';
-  $('#oPrice').value = o ? o.price || '' : '';
-  $('#oFlexible').value = o ? o.flexible : 'unknown';
-  $('#oFirstContact').value = o ? o.firstContactDate || '' : '';
-  $('#oLastFollowUp').value = o ? o.lastFollowUp || '' : todayStr();
-  $('#oStatus').value = o ? o.status : 'active';
-  $('#oInterested').value = o ? o.interested : 'unknown';
-  $('#oNotes').value = o ? o.notes || '' : '';
-  $('#btnDeleteOwner').classList.toggle('hidden', !o);
-  ownerModal.classList.remove('hidden');
-}
-
-$('#btnAddOwner').addEventListener('click', () => openOwnerModal(null));
-$('#btnCancelOwner').addEventListener('click', () => ownerModal.classList.add('hidden'));
-
-$('#ownerForm').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const id = $('#oId').value || uid();
-  const existing = owners.find((x) => x.id === id);
-  const data = {
-    id,
-    name: $('#oName').value.trim(),
-    phone: $('#oPhone').value.trim(),
-    type: $('#oType').value,
-    potential: $('#oPotential').value,
-    property: $('#oProperty').value.trim(),
-    price: $('#oPrice').value.trim(),
-    flexible: $('#oFlexible').value,
-    firstContactDate: $('#oFirstContact').value,
-    lastFollowUp: $('#oLastFollowUp').value,
-    status: $('#oStatus').value,
-    interested: $('#oInterested').value,
-    notes: $('#oNotes').value.trim(),
-    lastInsightAppliedAt: existing ? existing.lastInsightAppliedAt : null,
-  };
-  const idx = owners.findIndex((x) => x.id === id);
-  if (idx >= 0) owners[idx] = data; else owners.push(data);
-  persistOwners();
-  ownerModal.classList.add('hidden');
-  renderFollowup();
-  renderOwners();
-});
-
-$('#btnDeleteOwner').addEventListener('click', () => {
-  const id = $('#oId').value;
-  if (!id) return;
-  if (!confirm('این مالک حذف شود؟')) return;
-  owners = owners.filter((x) => x.id !== id);
-  persistOwners();
-  ownerModal.classList.add('hidden');
-  renderFollowup();
-  renderOwners();
 });
 
 // ==================================================================
@@ -713,6 +639,20 @@ $('#btnDeleteProject').addEventListener('click', () => {
 // LISTINGS (بازار ثانویه/آماده — فایل خود کاربر)
 // ==================================================================
 
+// شماره رو به فرمت بین‌المللی ایران (بدون + یا صفر ابتدایی) تبدیل می‌کنه، برای ساخت لینک واتساپ/تلگرام
+function toIntlIranPhone(phone) {
+  let digits = String(phone || '').replace(/\D/g, '');
+  if (digits.startsWith('0')) digits = '98' + digits.slice(1);
+  else if (!digits.startsWith('98') && digits.length === 10) digits = '98' + digits;
+  return digits;
+}
+
+function contactLink(phone, platform) {
+  const intl = toIntlIranPhone(phone);
+  if (!intl) return '';
+  return platform === 'telegram' ? `https://t.me/+${intl}` : `https://wa.me/${intl}`;
+}
+
 function renderListings() {
   const container = $('#listingList');
   container.innerHTML = '';
@@ -723,17 +663,25 @@ function renderListings() {
   listings.forEach((l) => {
     const card = document.createElement('div');
     card.className = 'card';
+    const link = l.ownerPhone ? contactLink(l.ownerPhone, l.contactPlatform) : '';
     card.innerHTML = `
       <div class="card-top">
         <div>
           <div class="card-name">${escapeHtml(l.name)}</div>
           <div class="card-sub">${LABELS.type[l.type]} ${l.location ? '· ' + escapeHtml(l.location) : ''} ${l.price ? '· ' + escapeHtml(l.price) : ''}</div>
-          <div class="badges"><span class="badge">${l.status === 'soldout' ? 'فروخته شده' : 'فعال'}</span></div>
+          <div class="card-sub">${l.ownerPhone ? 'مالک: ' + escapeHtml(l.ownerPhone) : 'شماره مالک ثبت نشده'}</div>
+          <div class="badges">
+            <span class="badge">${l.status === 'soldout' ? 'فروخته شده' : 'فعال'}</span>
+            ${!l.driveLink ? '<span class="badge overdue">⚠️ بدون عکس/ویدیو</span>' : ''}
+          </div>
         </div>
         <div class="card-actions">
+          ${link ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(link)}" target="_blank" rel="noopener">${LABELS.contactPlatform[l.contactPlatform] || 'واتساپ'}</a>` : ''}
+          ${l.driveLink ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(l.driveLink)}" target="_blank" rel="noopener">درایو</a>` : ''}
           <button class="btn btn-ghost btn-sm" data-action="edit-listing" data-id="${l.id}">ویرایش</button>
         </div>
       </div>
+      ${!l.driveLink ? '<div class="followup-suggestion insight-banner">📸 این ملک هنوز عکس/ویدیو در گوگل درایو نداره — از مالک بخواید و لینکش رو ثبت کنید.</div>' : ''}
       ${l.notes ? `<div class="followup-suggestion">${escapeHtml(l.notes)}</div>` : ''}
     `;
     container.appendChild(card);
@@ -750,6 +698,9 @@ function openListingModal(id) {
   $('#lStatus').value = l ? l.status : 'active';
   $('#lLocation').value = l ? l.location || '' : '';
   $('#lPrice').value = l ? l.price || '' : '';
+  $('#lOwnerPhone').value = l ? l.ownerPhone || '' : '';
+  $('#lContactPlatform').value = l ? l.contactPlatform || 'whatsapp' : 'whatsapp';
+  $('#lDriveLink').value = l ? l.driveLink || '' : '';
   $('#lNotes').value = l ? l.notes || '' : '';
   $('#btnDeleteListing').classList.toggle('hidden', !l);
   listingModal.classList.remove('hidden');
@@ -761,13 +712,15 @@ $('#listingForm').addEventListener('submit', (e) => {
   const id = $('#lId').value || uid();
   const data = {
     id, name: $('#lName').value.trim(), type: $('#lType').value, status: $('#lStatus').value,
-    location: $('#lLocation').value.trim(), price: $('#lPrice').value.trim(), notes: $('#lNotes').value.trim(),
+    location: $('#lLocation').value.trim(), price: $('#lPrice').value.trim(),
+    ownerPhone: $('#lOwnerPhone').value.trim(), contactPlatform: $('#lContactPlatform').value,
+    driveLink: $('#lDriveLink').value.trim(), notes: $('#lNotes').value.trim(),
   };
   const idx = listings.findIndex((x) => x.id === id);
   if (idx >= 0) listings[idx] = data; else listings.push(data);
   persistListings();
   listingModal.classList.add('hidden');
-  renderListings(); renderFollowup(); populateAssignedSelect();
+  renderListings(); renderFollowup(); populateAssignedSelect(); renderNewLeads();
 });
 $('#btnDeleteListing').addEventListener('click', () => {
   const id = $('#lId').value;
@@ -783,7 +736,7 @@ $('#btnDeleteListing').addEventListener('click', () => {
 // ==================================================================
 
 $('#btnExport').addEventListener('click', () => {
-  const payload = { customers, owners, projects, listings, exportedAt: new Date().toISOString() };
+  const payload = { customers, projects, listings, exportedAt: new Date().toISOString() };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -800,10 +753,9 @@ $('#importFile').addEventListener('change', async (e) => {
     const payload = JSON.parse(await file.text());
     if (!confirm('این کار داده‌های فعلی را با فایل پشتیبان جایگزین می‌کند. ادامه می‌دهید؟')) return;
     customers = payload.customers || [];
-    owners = payload.owners || [];
     projects = payload.projects || [];
     listings = payload.listings || [];
-    persistCustomers(); persistOwners(); persistProjects(); persistListings();
+    persistCustomers(); persistProjects(); persistListings();
     renderAll();
   } catch {
     alert('فایل پشتیبان معتبر نیست.');
@@ -811,12 +763,13 @@ $('#importFile').addEventListener('change', async (e) => {
   e.target.value = '';
 });
 
-// خروجی لیست شماره‌ها برای ربات واتساپ متصل به شماره اصلی (whatsapp-bot-clients)
-// این فایل را دانلود و به صورت دستی جای data/contacts.json در ریپازیتوری commit کنید.
+// خروجی لیست شماره‌های شناخته‌شده (مشتری‌ها + مالک‌های ثبت‌شده روی ملک‌ها) برای ربات واتساپ متصل به شماره اصلی
+// (whatsapp-bot-clients) — این فایل را دانلود و به صورت دستی جای data/contacts.json در ریپازیتوری commit کنید
+// تا ربات این شماره‌ها را از «مخاطب تازه» تشخیص بدهد و ندهد.
 $('#btnExportWatchlist').addEventListener('click', () => {
   const contacts = [
     ...customers.filter((c) => c.phone).map((c) => ({ phone: c.phone, name: c.name, role: 'customer' })),
-    ...owners.filter((o) => o.phone).map((o) => ({ phone: o.phone, name: o.name, role: 'owner' })),
+    ...listings.filter((l) => l.ownerPhone).map((l) => ({ phone: l.ownerPhone, name: l.name, role: 'owner' })),
   ];
   const blob = new Blob([JSON.stringify(contacts, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -825,7 +778,7 @@ $('#btnExportWatchlist').addEventListener('click', () => {
   a.download = 'contacts.json';
   a.click();
   URL.revokeObjectURL(url);
-  alert('فایل contacts.json دانلود شد. آن را جایگزین data/contacts.json در ریپازیتوری گیت‌هاب کنید (راهنما: whatsapp-bot-clients/README.md) تا ربات واتساپ این شماره‌ها را بشناسد.');
+  alert('فایل contacts.json دانلود شد. آن را جایگزین data/contacts.json در ریپازیتوری گیت‌هاب کنید (راهنما: whatsapp-bot-clients/README.md).');
 });
 
 // ---------- misc utils ----------
@@ -840,7 +793,6 @@ function escapeHtml(str) {
 function renderAll() {
   renderFollowup();
   renderCustomers();
-  renderOwners();
   renderProjects();
   renderListings();
   populateAssignedSelect();
@@ -849,3 +801,4 @@ function renderAll() {
 renderAll();
 loadContactInsights();
 loadAutoProjects();
+loadNewLeads();
