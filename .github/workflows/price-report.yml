@@ -1,0 +1,60 @@
+name: Generate price report
+
+on:
+  workflow_dispatch:
+    inputs:
+      title:
+        description: 'عنوان ملک'
+        required: true
+      location:
+        description: 'موقعیت / منطقه'
+        required: true
+      price:
+        description: 'قیمت درخواستی فعلی'
+        required: true
+      area:
+        description: 'متراژ (اختیاری)'
+        required: false
+      description:
+        description: 'توضیحات ملک (اختیاری)'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install --omit=dev
+
+      - name: Run price report generator
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PROPERTY_TITLE: ${{ inputs.title }}
+          PROPERTY_LOCATION: ${{ inputs.location }}
+          PROPERTY_PRICE: ${{ inputs.price }}
+          PROPERTY_AREA: ${{ inputs.area }}
+          PROPERTY_DESCRIPTION: ${{ inputs.description }}
+        run: node scripts/generate-price-report.js
+
+      - name: Commit and push report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add reports/
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: add price analysis report [automated]"
+            git push
+          fi

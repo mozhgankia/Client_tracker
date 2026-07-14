@@ -16,20 +16,24 @@
       ورود پشتیبان
       <input type="file" id="importFile" accept="application/json" hidden>
     </label>
+    <button id="btnExportWatchlist" class="btn btn-ghost">خروجی برای ربات واتساپ</button>
   </div>
 </header>
 
 <nav class="tabs">
   <button class="tab-btn active" data-tab="followup">🔔 پیگیری امروز</button>
   <button class="tab-btn" data-tab="customers">👥 مشتری‌ها</button>
-  <button class="tab-btn" data-tab="projects">🏗️ پروژه‌های پیش‌فروش (ریلی)</button>
-  <button class="tab-btn" data-tab="listings">🏠 بازار ثانویه (فایل خودم)</button>
+  <button class="tab-btn" data-tab="projects">🏗️ پرایمری (پروژه‌های سازنده)</button>
+  <button class="tab-btn" data-tab="secPresale">🏠 سکندری - پیش‌فروش</button>
+  <button class="tab-btn" data-tab="secReady">🏠 سکندری - آماده</button>
+  <button class="tab-btn" data-tab="secRent">🏠 سکندری - اجاره</button>
 </nav>
 
 <main>
 
   <!-- FOLLOW UP TAB -->
   <section id="tab-followup" class="tab-panel active">
+    <div id="newLeadsList" class="card-list hidden"></div>
     <div class="panel-head">
       <h2>مشتری‌هایی که امروز باید بهشون پیام بدید</h2>
       <p class="hint">بر اساس پتانسیل خرید: زیاد=هر ۷ روز، متوسط=هر ۲۱ روز، کم=هر ۴۲ روز</p>
@@ -75,24 +79,45 @@
     <div id="customerList" class="card-list"></div>
   </section>
 
-  <!-- PROJECTS TAB -->
+  <!-- PROJECTS TAB (پرایمری) -->
   <section id="tab-projects" class="tab-panel">
     <div class="panel-head">
-      <h2>پروژه‌های پیش‌فروش</h2>
+      <h2>پرایمری — پروژه‌های مستقیم از سازنده</h2>
       <button id="btnAddProject" class="btn btn-primary">+ پروژه جدید</button>
     </div>
-    <p class="hint">این بخش جایگزین داخلی اپلیکیشن «ریلی» است — چون این اپ به API ریلی وصل نیست، پروژه‌های پیش‌فروش‌تان را همین‌جا وارد کنید تا در پیام یادآوری روزانه، پروژه مناسب هر مشتری پیشنهاد شود.</p>
+    <p class="hint">این بخش جایگزین داخلی اپلیکیشن «ریلی» است — چون این اپ به API ریلی وصل نیست، پروژه‌های سازنده‌ها را همین‌جا وارد کنید تا در پیام یادآوری روزانه، پروژه مناسب هر مشتری پیشنهاد شود. اکثر پروژه‌ها پیش‌فروش هستند؛ مورد نادر «آماده مستقیم از سازنده» هم با فیلد وضعیت تحویل قابل ثبت است.</p>
     <div id="projectList" class="card-list"></div>
   </section>
 
-  <!-- LISTINGS TAB -->
-  <section id="tab-listings" class="tab-panel">
+  <!-- SECONDARY - PRESALE -->
+  <section id="tab-secPresale" class="tab-panel">
     <div class="panel-head">
-      <h2>فایل بازار ثانویه (آماده)</h2>
-      <button id="btnAddListing" class="btn btn-primary">+ ملک جدید</button>
+      <h2>سکندری - پیش‌فروش</h2>
+      <button class="btn btn-primary" data-action="add-secondary" data-category="presale">+ ملک جدید</button>
     </div>
-    <p class="hint">فایل خودتان برای املاک آماده/ثانویه — برای پیشنهاد به مشتری‌های «آماده» استفاده می‌شود.</p>
-    <div id="listingList" class="card-list"></div>
+    <p class="hint">ملکی که یک نفر پیش‌فروش از سازنده خریده و حالا قبل از تحویل می‌خواهد بفروشد.</p>
+    <div id="secPresaleList" class="card-list"></div>
+  </section>
+
+  <!-- SECONDARY - READY (FOR SALE) -->
+  <section id="tab-secReady" class="tab-panel">
+    <div class="panel-head">
+      <h2>سکندری - آماده (برای فروش)</h2>
+      <button class="btn btn-primary" data-action="add-secondary" data-category="ready">+ ملک جدید</button>
+    </div>
+    <p class="hint">ملک تحویل‌گرفته‌شده که مالک برای فروش گذاشته. با دکمه پایین این تب می‌توانید یک گزارش تحلیل قیمت (نسبت به مارکت منطقه) برایش بسازید.</p>
+    <div id="reportsList" class="card-list"></div>
+    <div id="secReadyList" class="card-list"></div>
+  </section>
+
+  <!-- SECONDARY - RENT -->
+  <section id="tab-secRent" class="tab-panel">
+    <div class="panel-head">
+      <h2>سکندری - اجاره</h2>
+      <button class="btn btn-primary" data-action="add-secondary" data-category="rent">+ ملک جدید</button>
+    </div>
+    <p class="hint">ملک تحویل‌گرفته‌شده که مالک برای اجاره گذاشته.</p>
+    <div id="secRentList" class="card-list"></div>
   </section>
 
 </main>
@@ -202,6 +227,12 @@
           </select>
         </label>
       </div>
+      <label>وضعیت تحویل
+        <select id="pDeliveryStatus">
+          <option value="presale">پیش‌فروش</option>
+          <option value="ready">آماده (مورد نادر — مستقیم از سازنده)</option>
+        </select>
+      </label>
       <label>موقعیت / منطقه
         <input type="text" id="pLocation">
       </label>
@@ -220,41 +251,61 @@
   </div>
 </div>
 
-<!-- Listing Modal -->
-<div id="listingModal" class="modal-overlay hidden">
+<!-- Secondary Property Modal (شامل هر سه دسته: پیش‌فروش/آماده/اجاره) -->
+<div id="secondaryModal" class="modal-overlay hidden">
   <div class="modal">
-    <h3 id="listingModalTitle">ملک بازار ثانویه جدید</h3>
-    <form id="listingForm">
-      <input type="hidden" id="lId">
+    <h3 id="secondaryModalTitle">ملک سکندری جدید</h3>
+    <form id="secondaryForm">
+      <input type="hidden" id="sId">
+      <input type="hidden" id="sCategory">
       <label>عنوان ملک *
-        <input type="text" id="lName" required>
+        <input type="text" id="sName" required>
       </label>
       <div class="row2">
         <label>نوع
-          <select id="lType">
+          <select id="sType">
             <option value="residential">رزیدنشال</option>
             <option value="commercial">کامرشال</option>
           </select>
         </label>
         <label>وضعیت
-          <select id="lStatus">
+          <select id="sStatus">
             <option value="active">فعال</option>
-            <option value="soldout">فروخته شده</option>
+            <option value="closed">فروخته شد / اجاره داده شد</option>
           </select>
         </label>
       </div>
-      <label>موقعیت / منطقه
-        <input type="text" id="lLocation">
-      </label>
+      <div class="row2">
+        <label>موقعیت / منطقه
+          <input type="text" id="sLocation">
+        </label>
+        <label>متراژ
+          <input type="text" id="sArea" placeholder="مثلا: 120 متر">
+        </label>
+      </div>
       <label>قیمت
-        <input type="text" id="lPrice">
+        <input type="text" id="sPrice">
       </label>
-      <label>یادداشت
-        <textarea id="lNotes" rows="2"></textarea>
+      <label>توضیحات
+        <textarea id="sDescription" rows="2"></textarea>
+      </label>
+      <div class="row2">
+        <label>شماره تماس مالک
+          <input type="text" id="sOwnerPhone" placeholder="09xxxxxxxxx">
+        </label>
+        <label>پلتفرم تماس با مالک
+          <select id="sContactPlatform">
+            <option value="whatsapp">واتساپ</option>
+            <option value="telegram">تلگرام</option>
+          </select>
+        </label>
+      </div>
+      <label>لینک گوگل درایو (عکس/ویدیوی ملک)
+        <input type="url" id="sDriveLink" placeholder="https://drive.google.com/...">
       </label>
       <div class="modal-actions">
-        <button type="button" id="btnDeleteListing" class="btn btn-danger hidden">حذف ملک</button>
-        <button type="button" id="btnCancelListing" class="btn btn-ghost">انصراف</button>
+        <button type="button" id="btnDeleteSecondary" class="btn btn-danger hidden">حذف ملک</button>
+        <button type="button" id="btnCancelSecondary" class="btn btn-ghost">انصراف</button>
         <button type="submit" class="btn btn-primary">ذخیره</button>
       </div>
     </form>

@@ -163,6 +163,12 @@ main { max-width: 980px; margin: 0 auto; padding: 20px; }
   border-radius: 8px;
   padding: 8px 10px;
 }
+.insight-banner {
+  background: color-mix(in srgb, var(--primary) 10%, var(--bg));
+  border: 1px dashed var(--primary);
+  line-height: 1.8;
+}
+.insight-banner .btn { margin-top: 6px; }
 .followup-suggestion strong { color: var(--primary); }
 
 .empty-state {
