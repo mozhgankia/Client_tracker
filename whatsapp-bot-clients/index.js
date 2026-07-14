@@ -57,11 +57,11 @@ const CUSTOMER_INSIGHT_SCHEMA = {
   additionalProperties: false,
 };
 
-// برای مخاطب‌های ناشناس — اول باید تشخیص بدیم اصلاً مرتبط با کار املاک هست یا نه
+// برای مخاطب‌های ناشناس یا مالک‌های شناخته‌شده که ممکنه از ملک جدیدی حرف بزنن
 const LEAD_CLASSIFICATION_SCHEMA = {
   type: 'object',
   properties: {
-    is_relevant: { type: 'boolean', description: 'آیا این گفتگو نشان می‌دهد طرف مخاطب یک مشتری بالقوه خرید ملک یا مالک ملکی است که ممکن است بخواهد بفروشد؟' },
+    is_relevant: { type: 'boolean', description: 'آیا این گفتگو نشان می‌دهد طرف مخاطب یک مشتری بالقوه خرید ملک است، یا مالک یک ملکِ متفاوت از ملک‌های ثبت‌شده‌ی قبلی‌اش است که ممکن است بخواهد بفروشد؟' },
     role: { type: 'string', enum: ['customer', 'owner', 'not_relevant'] },
     suggested_potential: { type: 'string', enum: ['high', 'medium', 'low'] },
     property_hint: { type: 'string', description: 'اگر role=owner است، توضیح مختصر ملکی که مالک از آن صحبت کرده؛ در غیر این صورت رشته خالی' },
@@ -114,6 +114,10 @@ function saveJson(filePath, data) {
 // شماره تماس رو نرمال می‌کنه (فقط رقم، ۱۰ رقم آخر) — دقیقا مشابه app.js
 function normalizePhone(phone) {
   return String(phone || '').replace(/\D/g, '').slice(-10);
+}
+
+function slugify(text) {
+  return String(text || '').trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 60);
 }
 
 function loadExcludedNumbers() {
@@ -203,7 +207,12 @@ async function analyzeCustomer(name, transcriptLines) {
   }
 }
 
-async function classifyUnknownContact(name, transcriptLines) {
+async function classifyForLead(name, transcriptLines, existingProperties) {
+  const knownPropertiesNote = existingProperties && existingProperties.length
+    ? `این مخاطب از قبل مالک این ملک(ها) در سیستم ثبت شده: ${existingProperties.join('، ')}. اگر این گفتگو فقط درباره‌ی همین ملک(ها)ست ` +
+      `(نه ملک متفاوت/جدید)، is_relevant را false بگذارید — چون چیز تازه‌ای برای ثبت نیست. فقط اگر ملک متفاوت یا اضافه‌ای مطرح شده، ` +
+      `is_relevant را true بگذارید و آن ملک جدید را در property_hint توضیح دهید.\n\n`
+    : '';
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 1024,
@@ -212,8 +221,8 @@ async function classifyUnknownContact(name, transcriptLines) {
       {
         role: 'user',
         content:
-          `شما دستیار یک مشاور املاک هستید. متن زیر چند پیام اخیر واتساپ بین مشاور و «${name}» است — ` +
-          `کسی که هنوز در سیستم مشتری‌ها یا فایل ملک‌ها ثبت نشده. «من:» یعنی پیام از طرف مشاور.\n\n` +
+          `شما دستیار یک مشاور املاک هستید. متن زیر چند پیام اخیر واتساپ بین مشاور و «${name}» است. «من:» یعنی پیام از طرف مشاور.\n\n` +
+          knownPropertiesNote +
           `تشخیص بده آیا این گفتگو واقعاً مرتبط با کار املاک است (کسی که دنبال خرید ملک است، یا مالک ملکی است که ` +
           `ممکن است بخواهد بفروشد) یا کاملاً شخصی/بی‌ربط است (خانواده، دوستان، کار دیگر، تبلیغات و...). ` +
           `اگر مطمئن نیستید یا سرنخ کافی نیست، is_relevant را false بگذارید — فقط در صورت وجود سرنخ روشن true بزنید.\n\n` +
@@ -268,6 +277,14 @@ function scheduleAnalysis(jid, name) {
   );
 }
 
+function upsertLeadByKey(existing, phone, propertyHintOrName, buildEntry) {
+  const key = `${normalizePhone(phone)}::${slugify(propertyHintOrName)}`;
+  const byKey = new Map(existing.map((l) => [`${normalizePhone(l.phone)}::${slugify(l.property_hint || l.name)}`, l]));
+  const prior = byKey.get(key);
+  byKey.set(key, buildEntry(prior));
+  return Array.from(byKey.values());
+}
+
 async function runAnalysis(jid, name) {
   const buffer = buffers.get(jid) || [];
   if (buffer.length === 0) return;
@@ -282,12 +299,8 @@ async function runAnalysis(jid, name) {
   const lastIncoming = incoming[incoming.length - 1];
   const lastAny = buffer[buffer.length - 1];
 
-  if (match && match.role === 'owner') {
-    // مالک‌های ثبت‌شده روی یک ملک نیازی به تحلیل رفتاری ندارند — نادیده گرفته می‌شود
-    return;
-  }
-
   if (match && match.role === 'customer') {
+    // مشتری‌ها همیشه و مداوم پیگیری می‌شن (نه فقط یک‌بار)
     const analysis = await analyzeCustomer(match.name || name, transcriptLines);
     if (!analysis) return;
     const insightsPath = path.join(DATA_REPO_DIR, 'data', 'contact-insights.json');
@@ -308,17 +321,20 @@ async function runAnalysis(jid, name) {
     return;
   }
 
-  // مخاطب ناشناس — اول باید بفهمیم اصلاً مرتبطه یا نه
-  const classification = await classifyUnknownContact(name, transcriptLines);
+  // مالک شناخته‌شده (روی یک یا چند ملک) یا مخاطب کاملاً ناشناس — هر دو مداوم بررسی می‌شن،
+  // چون یک مالک ممکنه بعد از مدتی از یک ملکِ دیگر هم صحبت کنه
+  const existingProperties = match && match.role === 'owner' ? (match.properties || []) : [];
+  const classification = await classifyForLead(match ? (match.name || name) : name, transcriptLines, existingProperties);
   if (!classification || !classification.is_relevant || classification.role === 'not_relevant') return;
 
   const leadsPath = path.join(DATA_REPO_DIR, 'data', 'new-leads.json');
   let leads = loadJson(leadsPath, []);
   if (!Array.isArray(leads)) leads = [];
-  leads = upsertByPhone(leads, phone, (prior) => ({
+  const roleForLead = match ? match.role : classification.role;
+  leads = upsertLeadByKey(leads, phone, classification.property_hint || name, (prior) => ({
     phone,
-    name,
-    role: classification.role,
+    name: match ? match.name : name,
+    role: roleForLead,
     suggested_potential: classification.suggested_potential,
     property_hint: classification.property_hint,
     note: classification.note,
@@ -326,7 +342,7 @@ async function runAnalysis(jid, name) {
     updated_at: new Date().toISOString(),
   }));
   saveJson(leadsPath, leads);
-  console.log(`+ مخاطب تازه (${classification.role === 'owner' ? 'احتمالا مالک' : 'احتمالا مشتری'}) «${name}» ثبت شد.`);
+  console.log(`+ ${match ? 'ملک تازه از مالک شناخته‌شده' : 'مخاطب تازه'} (${roleForLead === 'owner' ? 'احتمالا مالک' : 'احتمالا مشتری'}) «${name}» ثبت شد.`);
   scheduleSync('data/new-leads.json');
 }
 

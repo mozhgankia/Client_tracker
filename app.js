@@ -5,7 +5,7 @@
 const STORAGE_KEYS = {
   customers: 'wct_customers',
   projects: 'wct_projects',
-  listings: 'wct_listings',
+  secondary: 'wct_secondary',
 };
 
 const POTENTIAL_INTERVAL_DAYS = { high: 7, medium: 21, low: 42 };
@@ -21,6 +21,9 @@ const LABELS = {
     multiplePurchases: 'چند خرید داشته',
     purchasedElsewhere: 'با کس دیگه خرید کرده',
   },
+  deliveryStatus: { presale: 'پیش‌فروش', ready: 'آماده (مستقیم از سازنده)' },
+  secCategory: { presale: 'سکندری - پیش‌فروش', ready: 'سکندری - آماده', rent: 'سکندری - اجاره' },
+  secStatus: { active: 'فعال', closed: 'فروخته شد / اجاره داده شد' },
   contactPlatform: { whatsapp: 'واتساپ', telegram: 'تلگرام' },
   interested: { yes: 'پاسخگو', no: 'بی‌پاسخ', unknown: 'نامشخص' },
 };
@@ -49,17 +52,22 @@ function normalizePhone(phone) {
   return digits.slice(-10);
 }
 
+function slugify(text) {
+  return String(text || '').trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 60);
+}
+
 let customers = loadArr(STORAGE_KEYS.customers);
 let projects = loadArr(STORAGE_KEYS.projects);
-let listings = loadArr(STORAGE_KEYS.listings);
+let secondary = loadArr(STORAGE_KEYS.secondary); // ملک‌های سکندری: presale/ready/rent در یک آرایه، با فیلد category
 let autoProjects = []; // fetched from data/projects.json (developer news monitor)
 let contactInsights = []; // fetched from data/contact-insights.json (WhatsApp main-number bot)
-let newLeads = []; // fetched from data/new-leads.json (contacts detected by the WhatsApp bot, not yet in the tracker)
+let newLeads = []; // fetched from data/new-leads.json (contacts/properties detected by the WhatsApp bot)
+let reportsIndex = []; // fetched from reports/index.json (price analysis reports)
 const dismissedLeads = new Set(loadArr('wct_dismissed_leads'));
 
 const persistCustomers = () => saveArr(STORAGE_KEYS.customers, customers);
 const persistProjects = () => saveArr(STORAGE_KEYS.projects, projects);
-const persistListings = () => saveArr(STORAGE_KEYS.listings, listings);
+const persistSecondary = () => saveArr(STORAGE_KEYS.secondary, secondary);
 const persistDismissedLeads = () => saveArr('wct_dismissed_leads', Array.from(dismissedLeads));
 
 // ---------- زنده از ربات واتساپ متصل به شماره اصلی (data/contact-insights.json) ----------
@@ -73,21 +81,49 @@ async function loadContactInsights() {
     contactInsights = [];
   }
   renderCustomers();
+  renderSecondaryTab('presale');
+  renderSecondaryTab('ready');
+  renderSecondaryTab('rent');
 }
 
-function findInsightFor(record) {
-  const phone = normalizePhone(record.phone);
-  if (!phone) return null;
-  return contactInsights.find((i) => normalizePhone(i.phone) === phone) || null;
+function findInsightForPhone(phone) {
+  const norm = normalizePhone(phone);
+  if (!norm) return null;
+  return contactInsights.find((i) => normalizePhone(i.phone) === norm) || null;
 }
 
-// ---------- مخاطب‌های تازه‌کشف‌شده توسط ربات واتساپ (data/new-leads.json) ----------
+// بنر پیشنهاد زنده‌ی ربات واتساپ برای یک شماره؛ اگه applyAction بدید یک دکمه اعمال هم نشون می‌ده
+// (برای مشتری‌ها که فیلد پتانسیل/علاقه‌مندی دارن)، وگرنه فقط اطلاعاتیه (برای مالک‌های روی ملک)
+function renderInsightBanner(phone, { applyAction, applyId, appliedAt } = {}) {
+  const insight = findInsightForPhone(phone);
+  if (!insight) return '';
+  if (appliedAt && appliedAt === insight.updated_at) return '';
+  const applyBtn = applyAction
+    ? `<div><button type="button" class="btn btn-primary btn-sm" data-action="${applyAction}" data-id="${escapeHtml(applyId)}">اعمال پیشنهاد</button></div>`
+    : '';
+  return `
+    <div class="followup-suggestion insight-banner">
+      🤖 پیام تازه در واتساپ (${insight.last_message_at ? toFa(insight.last_message_at.slice(0, 10)) : 'اخیراً'}):
+      ${insight.last_message_preview ? `«${escapeHtml(insight.last_message_preview)}»<br>` : ''}
+      ${insight.note ? escapeHtml(insight.note) + '<br>' : ''}
+      ${insight.suggested_potential ? `پتانسیل پیشنهادی: <strong>${LABELS.potential[insight.suggested_potential] || '—'}</strong> · ` : ''}
+      ${insight.suggested_interested ? `علاقه‌مندی: <strong>${LABELS.interested[insight.suggested_interested] || 'نامشخص'}</strong>` : ''}
+      ${applyBtn}
+    </div>
+  `;
+}
+
+// ---------- مخاطب‌ها/ملک‌های تازه‌کشف‌شده توسط ربات واتساپ (data/new-leads.json) ----------
+function leadKey(lead) {
+  return `${normalizePhone(lead.phone)}::${slugify(lead.property_hint || lead.name)}`;
+}
+
 async function loadNewLeads() {
   try {
     const res = await fetch('data/new-leads.json', { cache: 'no-store' });
     if (!res.ok) return;
     const raw = await res.json();
-    newLeads = Array.isArray(raw) ? raw : [];
+    newLeads = (Array.isArray(raw) ? raw : []).map((l) => ({ ...l, _key: leadKey(l) }));
   } catch {
     newLeads = [];
   }
@@ -96,13 +132,22 @@ async function loadNewLeads() {
 
 function renderNewLeads() {
   const container = $('#newLeadsList');
-  const knownPhones = new Set([
-    ...customers.map((c) => normalizePhone(c.phone)),
-    ...listings.map((l) => normalizePhone(l.ownerPhone)),
-  ]);
+
   const visible = newLeads.filter((l) => {
-    const phone = normalizePhone(l.phone);
-    return phone && !knownPhones.has(phone) && !dismissedLeads.has(phone);
+    if (dismissedLeads.has(l._key)) return false;
+    if (l.role === 'customer') {
+      const phone = normalizePhone(l.phone);
+      return !customers.some((c) => normalizePhone(c.phone) === phone);
+    }
+    if (l.role === 'owner') {
+      // فقط اگه دقیقاً همین ملک قبلاً ثبت شده، مخفی کن — چون یک مالک ممکنه چند ملک جدا داشته باشه
+      const phone = normalizePhone(l.phone);
+      const already = secondary.some((s) =>
+        normalizePhone(s.ownerPhone) === phone && s.name && slugify(s.name) === slugify(l.property_hint || l.name)
+      );
+      return !already;
+    }
+    return false;
   });
 
   if (visible.length === 0) {
@@ -111,12 +156,13 @@ function renderNewLeads() {
     return;
   }
   container.classList.remove('hidden');
-  container.innerHTML = `<div class="panel-head"><h2>🤖 مخاطب‌های تازه (از واتساپ)</h2></div>` +
+  container.innerHTML = `<div class="panel-head"><h2>🤖 مخاطب‌ها/ملک‌های تازه (از واتساپ)</h2></div>` +
     visible.map((l) => `
       <div class="card">
         <div class="card-top">
           <div>
             <div class="card-name">${escapeHtml(l.name || l.phone)} <span class="card-sub">(${escapeHtml(l.phone)})</span></div>
+            <div class="card-sub">${l.property_hint ? escapeHtml(l.property_hint) : ''}</div>
             <div class="card-sub">${l.note ? escapeHtml(l.note) : ''}</div>
             <div class="badges">
               <span class="badge">${l.role === 'owner' ? 'احتمالا مالک' : 'احتمالا مشتری'}</span>
@@ -124,13 +170,29 @@ function renderNewLeads() {
             </div>
           </div>
           <div class="card-actions">
-            <button class="btn btn-primary btn-sm" data-action="lead-add-customer" data-id="${escapeHtml(l.phone)}">+ مشتری</button>
-            <button class="btn btn-primary btn-sm" data-action="lead-add-listing" data-id="${escapeHtml(l.phone)}">+ ملک (بازار ثانویه)</button>
-            <button class="btn btn-ghost btn-sm" data-action="lead-dismiss" data-id="${escapeHtml(l.phone)}">نادیده بگیر</button>
+            ${l.role === 'owner'
+              ? `<button class="btn btn-primary btn-sm" data-action="lead-add-secondary" data-id="${escapeHtml(l._key)}">+ ملک سکندری</button>`
+              : `<button class="btn btn-primary btn-sm" data-action="lead-add-customer" data-id="${escapeHtml(l._key)}">+ مشتری</button>`}
+            <button class="btn btn-ghost btn-sm" data-action="lead-dismiss" data-id="${escapeHtml(l._key)}">نادیده بگیر</button>
           </div>
         </div>
       </div>
     `).join('');
+}
+
+function prefillFromLead(key, kind) {
+  const lead = newLeads.find((l) => l._key === key);
+  if (!lead) return;
+  if (kind === 'customer') {
+    $('#cName').value = lead.name || '';
+    $('#cPhone').value = lead.phone || '';
+    if (lead.suggested_potential) $('#cPotential').value = lead.suggested_potential;
+    if (lead.note) $('#cNotes').value = lead.note;
+  } else {
+    $('#sName').value = lead.property_hint || lead.name || '';
+    $('#sOwnerPhone').value = lead.phone || '';
+    if (lead.note) $('#sDescription').value = lead.note;
+  }
 }
 
 // ---------- auto-detected developer projects (data/projects.json) ----------
@@ -144,6 +206,7 @@ async function loadAutoProjects() {
       name: p.project_name,
       type: p.type === 'commercial' ? 'commercial' : 'residential',
       status: p.status || '',
+      deliveryStatus: 'presale',
       location: p.location || '',
       price: p.price_range || '',
       notes: [p.note, p.event_type ? `(${p.event_type})` : ''].filter(Boolean).join(' '),
@@ -159,6 +222,43 @@ async function loadAutoProjects() {
   renderProjects();
   renderFollowup();
   populateAssignedSelect();
+}
+
+// ---------- گزارش‌های تحلیل قیمت (reports/index.json) ----------
+async function loadReportsIndex() {
+  try {
+    const res = await fetch('reports/index.json', { cache: 'no-store' });
+    if (!res.ok) return;
+    const raw = await res.json();
+    reportsIndex = Array.isArray(raw) ? raw : [];
+  } catch {
+    reportsIndex = [];
+  }
+  renderReports();
+}
+
+function renderReports() {
+  const container = $('#reportsList');
+  if (!container) return;
+  if (reportsIndex.length === 0) {
+    container.innerHTML = '<p class="hint">هنوز گزارش تحلیل قیمتی ساخته نشده — از تب Actions در گیت‌هاب، «Generate price report» را دستی اجرا کنید.</p>';
+    return;
+  }
+  const sorted = [...reportsIndex].sort((a, b) => (b.generatedAt || '').localeCompare(a.generatedAt || ''));
+  container.innerHTML = `<p class="hint">📄 گزارش‌های تحلیل قیمت اخیر:</p>` +
+    sorted.map((r) => `
+      <div class="card">
+        <div class="card-top">
+          <div>
+            <div class="card-name">${escapeHtml(r.title || r.slug)}</div>
+            <div class="card-sub">${r.location ? escapeHtml(r.location) + ' · ' : ''}${r.generatedAt ? toFa(r.generatedAt.slice(0, 10)) : ''}</div>
+          </div>
+          <div class="card-actions">
+            <a class="btn btn-ghost btn-sm" href="${escapeHtml(r.path)}" target="_blank" rel="noopener">مشاهده / اکسپورت</a>
+          </div>
+        </div>
+      </div>
+    `).join('');
 }
 
 // ترکیب پروژه‌های خودکار (تشخیص‌داده‌شده از سایت سازنده‌ها) با پروژه‌های دستی، مرتب‌شده بر اساس priority سازنده
@@ -186,7 +286,10 @@ $('#todayDate').textContent = new Date().toLocaleDateString('fa-IR', {
 // ==================================================================
 
 function matchingPool(customer) {
-  return customer.subtype === 'presale' ? getAllProjects() : listings;
+  if (customer.subtype === 'presale') {
+    return [...getAllProjects(), ...secondary.filter((s) => s.category === 'presale')];
+  }
+  return secondary.filter((s) => s.category === 'ready');
 }
 
 function suggestMatch(customer) {
@@ -195,7 +298,7 @@ function suggestMatch(customer) {
     const found = pool.find((p) => p.id === customer.assignedId);
     if (found) return found;
   }
-  return pool.find((p) => p.type === customer.type && p.status !== 'soldout') || null;
+  return pool.find((p) => p.type === customer.type && p.status !== 'soldout' && p.status !== 'closed') || null;
 }
 
 function renderFollowup() {
@@ -239,27 +342,11 @@ function renderFollowup() {
         </div>
       </div>
       ${suggestion
-        ? `<div class="followup-suggestion">📎 پیشنهاد ${c.subtype === 'presale' ? 'پروژه' : 'ملک'}: <strong>${escapeHtml(suggestion.name)}</strong> ${suggestion.location ? `— ${escapeHtml(suggestion.location)}` : ''}</div>`
-        : `<div class="followup-suggestion">هنوز ${c.subtype === 'presale' ? 'پروژه‌ای در بخش پیش‌فروش' : 'ملکی در فایل بازار ثانویه'} برای پیشنهاد ثبت نشده.</div>`}
+        ? `<div class="followup-suggestion">📎 پیشنهاد ${c.subtype === 'presale' ? 'پروژه/ملک' : 'ملک'}: <strong>${escapeHtml(suggestion.name)}</strong> ${suggestion.location ? `— ${escapeHtml(suggestion.location)}` : ''}</div>`
+        : `<div class="followup-suggestion">هنوز ${c.subtype === 'presale' ? 'پروژه/ملکی در بخش پیش‌فروش' : 'ملکی در سکندری - آماده'} برای پیشنهاد ثبت نشده.</div>`}
     `;
     container.appendChild(card);
   });
-}
-
-// بنر پیشنهاد زنده‌ی ربات واتساپ (شماره اصلی) برای یک مشتری/مالک، اگه پیام تازه‌ای تحلیل شده و هنوز اعمال نشده
-function renderInsightBanner(record, kind) {
-  const insight = findInsightFor(record);
-  if (!insight || record.lastInsightAppliedAt === insight.updated_at) return '';
-  return `
-    <div class="followup-suggestion insight-banner">
-      🤖 پیام تازه در واتساپ (${insight.last_message_at ? toFa(insight.last_message_at.slice(0, 10)) : 'اخیراً'}):
-      ${insight.last_message_preview ? `«${escapeHtml(insight.last_message_preview)}»<br>` : ''}
-      ${insight.note ? escapeHtml(insight.note) + '<br>' : ''}
-      پتانسیل پیشنهادی: <strong>${LABELS.potential[insight.suggested_potential] || '—'}</strong> ·
-      علاقه‌مندی: <strong>${LABELS.interested[insight.suggested_interested] || 'نامشخص'}</strong>
-      <div><button type="button" class="btn btn-primary btn-sm" data-action="apply-insight" data-kind="${kind}" data-id="${record.id}">اعمال پیشنهاد</button></div>
-    </div>
-  `;
 }
 
 function renderCustomers() {
@@ -308,7 +395,7 @@ function renderCustomers() {
         </div>
       </div>
       ${c.notes ? `<div class="followup-suggestion">${escapeHtml(c.notes)}</div>` : ''}
-      ${renderInsightBanner(c, 'customer')}
+      ${renderInsightBanner(c.phone, { applyAction: 'apply-insight', applyId: c.id, appliedAt: c.lastInsightAppliedAt })}
     `;
     container.appendChild(card);
   });
@@ -321,28 +408,29 @@ function renderCustomers() {
 document.body.addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-action]');
   if (!btn) return;
-  const { action, id, kind } = btn.dataset;
+  const { action, id, category } = btn.dataset;
   if (action === 'edit-customer') openCustomerModal(id);
   if (action === 'mark-followup') {
     const c = customers.find((x) => x.id === id);
     if (c) { c.lastFollowUp = todayStr(); persistCustomers(); renderFollowup(); renderCustomers(); }
   }
-  if (action === 'apply-insight') applyInsight(kind, id);
+  if (action === 'apply-insight') applyInsight(id);
   if (action === 'edit-project') openProjectModal(id);
-  if (action === 'edit-listing') openListingModal(id);
+  if (action === 'add-secondary') openSecondaryModal(null, category);
+  if (action === 'edit-secondary') openSecondaryModal(id);
   if (action === 'lead-add-customer') { openCustomerModal(null); prefillFromLead(id, 'customer'); }
-  if (action === 'lead-add-listing') { openListingModal(null); prefillFromLead(id, 'owner'); }
+  if (action === 'lead-add-secondary') { openSecondaryModal(null, 'ready'); prefillFromLead(id, 'owner'); }
   if (action === 'lead-dismiss') {
-    dismissedLeads.add(normalizePhone(id));
+    dismissedLeads.add(id);
     persistDismissedLeads();
     renderNewLeads();
   }
 });
 
-function applyInsight(kind, id) {
+function applyInsight(id) {
   const record = customers.find((x) => x.id === id);
   if (!record) return;
-  const insight = findInsightFor(record);
+  const insight = findInsightForPhone(record.phone);
   if (!insight) return;
   if (insight.suggested_potential) record.potential = insight.suggested_potential;
   if (insight.suggested_interested && insight.suggested_interested !== 'unknown') record.interested = insight.suggested_interested;
@@ -353,27 +441,14 @@ function applyInsight(kind, id) {
   renderFollowup();
 }
 
-function prefillFromLead(phone, kind) {
-  const lead = newLeads.find((l) => normalizePhone(l.phone) === normalizePhone(phone));
-  if (!lead) return;
-  if (kind === 'customer') {
-    $('#cName').value = lead.name || '';
-    $('#cPhone').value = lead.phone || '';
-    if (lead.suggested_potential) $('#cPotential').value = lead.suggested_potential;
-    if (lead.note) $('#cNotes').value = lead.note;
-  } else {
-    $('#lName').value = lead.property_hint || lead.name || '';
-    $('#lOwnerPhone').value = lead.phone || '';
-    if (lead.note) $('#lNotes').value = lead.note;
-  }
-}
-
 // ---------- Customer modal ----------
 const customerModal = $('#customerModal');
 
 function populateAssignedSelect() {
   const subtype = $('#cSubtype').value;
-  const pool = subtype === 'presale' ? getAllProjects() : listings;
+  const pool = subtype === 'presale'
+    ? [...getAllProjects(), ...secondary.filter((s) => s.category === 'presale')]
+    : secondary.filter((s) => s.category === 'ready');
   const select = $('#cAssigned');
   const current = select.value;
   select.innerHTML = '<option value="">— بدون تخصیص (پیشنهاد خودکار) —</option>' +
@@ -410,6 +485,7 @@ $('#btnCancelCustomer').addEventListener('click', () => customerModal.classList.
 $('#customerForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const id = $('#cId').value || uid();
+  const existing = customers.find((x) => x.id === id);
   const data = {
     id,
     name: $('#cName').value.trim(),
@@ -423,6 +499,7 @@ $('#customerForm').addEventListener('submit', (e) => {
     status: $('#cStatus').value,
     assignedId: $('#cAssigned').value || null,
     notes: $('#cNotes').value.trim(),
+    lastInsightAppliedAt: existing ? existing.lastInsightAppliedAt : null,
   };
   const idx = customers.findIndex((x) => x.id === id);
   if (idx >= 0) customers[idx] = data; else customers.push(data);
@@ -563,7 +640,7 @@ $('#chatFile').addEventListener('change', async (e) => {
 });
 
 // ==================================================================
-// PROJECTS (پیش‌فروش — جایگزین داخلی «ریلی»)
+// PROJECTS (پرایمری — مستقیم از سازنده — جایگزین داخلی «ریلی»)
 // ==================================================================
 
 function renderProjects() {
@@ -583,7 +660,10 @@ function renderProjects() {
         <div>
           <div class="card-name">${escapeHtml(p.name)} ${p.auto ? '<span class="card-sub">🤖 خودکار — از سایت ' + escapeHtml(p.developerName || '') + '</span>' : ''}</div>
           <div class="card-sub">${LABELS.type[p.type]} ${p.location ? '· ' + escapeHtml(p.location) : ''} ${p.price ? '· ' + escapeHtml(p.price) : ''} ${p.auto ? '· اولویت سازنده ' + p.priority : ''}</div>
-          <div class="badges"><span class="badge">${statusBadge}</span></div>
+          <div class="badges">
+            <span class="badge">${statusBadge}</span>
+            ${p.deliveryStatus === 'ready' ? '<span class="badge">🏠 آماده (مستقیم از سازنده)</span>' : ''}
+          </div>
         </div>
         <div class="card-actions">
           ${p.auto
@@ -605,6 +685,7 @@ function openProjectModal(id) {
   $('#pName').value = p ? p.name : '';
   $('#pType').value = p ? p.type : 'residential';
   $('#pStatus').value = p ? p.status : 'active';
+  $('#pDeliveryStatus').value = p ? p.deliveryStatus || 'presale' : 'presale';
   $('#pLocation').value = p ? p.location || '' : '';
   $('#pPrice').value = p ? p.price || '' : '';
   $('#pNotes').value = p ? p.notes || '' : '';
@@ -618,6 +699,7 @@ $('#projectForm').addEventListener('submit', (e) => {
   const id = $('#pId').value || uid();
   const data = {
     id, name: $('#pName').value.trim(), type: $('#pType').value, status: $('#pStatus').value,
+    deliveryStatus: $('#pDeliveryStatus').value,
     location: $('#pLocation').value.trim(), price: $('#pPrice').value.trim(), notes: $('#pNotes').value.trim(),
   };
   const idx = projects.findIndex((x) => x.id === id);
@@ -636,7 +718,7 @@ $('#btnDeleteProject').addEventListener('click', () => {
 });
 
 // ==================================================================
-// LISTINGS (بازار ثانویه/آماده — فایل خود کاربر)
+// SECONDARY (سکندری - پیش‌فروش / آماده / اجاره) — با اطلاعات مالک
 // ==================================================================
 
 // شماره رو به فرمت بین‌المللی ایران (بدون + یا صفر ابتدایی) تبدیل می‌کنه، برای ساخت لینک واتساپ/تلگرام
@@ -653,82 +735,99 @@ function contactLink(phone, platform) {
   return platform === 'telegram' ? `https://t.me/+${intl}` : `https://wa.me/${intl}`;
 }
 
-function renderListings() {
-  const container = $('#listingList');
+const SECONDARY_CONTAINERS = { presale: 'secPresaleList', ready: 'secReadyList', rent: 'secRentList' };
+
+function renderSecondaryTab(category) {
+  const container = $(`#${SECONDARY_CONTAINERS[category]}`);
+  if (!container) return;
+  const items = secondary.filter((s) => s.category === category);
   container.innerHTML = '';
-  if (listings.length === 0) {
-    container.innerHTML = '<div class="empty-state">هنوز ملکی ثبت نشده.</div>';
+  if (items.length === 0) {
+    container.innerHTML = '<div class="empty-state">هنوز ملکی در این بخش ثبت نشده.</div>';
     return;
   }
-  listings.forEach((l) => {
+  items.forEach((s) => {
     const card = document.createElement('div');
     card.className = 'card';
-    const link = l.ownerPhone ? contactLink(l.ownerPhone, l.contactPlatform) : '';
+    const link = s.ownerPhone ? contactLink(s.ownerPhone, s.contactPlatform) : '';
     card.innerHTML = `
       <div class="card-top">
         <div>
-          <div class="card-name">${escapeHtml(l.name)}</div>
-          <div class="card-sub">${LABELS.type[l.type]} ${l.location ? '· ' + escapeHtml(l.location) : ''} ${l.price ? '· ' + escapeHtml(l.price) : ''}</div>
-          <div class="card-sub">${l.ownerPhone ? 'مالک: ' + escapeHtml(l.ownerPhone) : 'شماره مالک ثبت نشده'}</div>
+          <div class="card-name">${escapeHtml(s.name)}</div>
+          <div class="card-sub">${LABELS.type[s.type]} ${s.location ? '· ' + escapeHtml(s.location) : ''} ${s.area ? '· ' + escapeHtml(s.area) : ''} ${s.price ? '· ' + escapeHtml(s.price) : ''}</div>
+          <div class="card-sub">${s.ownerPhone ? 'مالک: ' + escapeHtml(s.ownerPhone) : 'شماره مالک ثبت نشده'}</div>
           <div class="badges">
-            <span class="badge">${l.status === 'soldout' ? 'فروخته شده' : 'فعال'}</span>
-            ${!l.driveLink ? '<span class="badge overdue">⚠️ بدون عکس/ویدیو</span>' : ''}
+            <span class="badge">${LABELS.secStatus[s.status] || 'فعال'}</span>
+            ${!s.driveLink ? '<span class="badge overdue">⚠️ بدون عکس/ویدیو</span>' : ''}
           </div>
         </div>
         <div class="card-actions">
-          ${link ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(link)}" target="_blank" rel="noopener">${LABELS.contactPlatform[l.contactPlatform] || 'واتساپ'}</a>` : ''}
-          ${l.driveLink ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(l.driveLink)}" target="_blank" rel="noopener">درایو</a>` : ''}
-          <button class="btn btn-ghost btn-sm" data-action="edit-listing" data-id="${l.id}">ویرایش</button>
+          ${link ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(link)}" target="_blank" rel="noopener">${LABELS.contactPlatform[s.contactPlatform] || 'واتساپ'}</a>` : ''}
+          ${s.driveLink ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(s.driveLink)}" target="_blank" rel="noopener">درایو</a>` : ''}
+          <button class="btn btn-ghost btn-sm" data-action="edit-secondary" data-id="${s.id}">ویرایش</button>
         </div>
       </div>
-      ${!l.driveLink ? '<div class="followup-suggestion insight-banner">📸 این ملک هنوز عکس/ویدیو در گوگل درایو نداره — از مالک بخواید و لینکش رو ثبت کنید.</div>' : ''}
-      ${l.notes ? `<div class="followup-suggestion">${escapeHtml(l.notes)}</div>` : ''}
+      ${!s.driveLink ? '<div class="followup-suggestion insight-banner">📸 این ملک هنوز عکس/ویدیو در گوگل درایو نداره — از مالک بخواید و لینکش رو ثبت کنید.</div>' : ''}
+      ${s.description ? `<div class="followup-suggestion">${escapeHtml(s.description)}</div>` : ''}
+      ${renderInsightBanner(s.ownerPhone)}
     `;
     container.appendChild(card);
   });
 }
 
-const listingModal = $('#listingModal');
-function openListingModal(id) {
-  const l = id ? listings.find((x) => x.id === id) : null;
-  $('#listingModalTitle').textContent = l ? 'ویرایش ملک' : 'ملک بازار ثانویه جدید';
-  $('#lId').value = l ? l.id : '';
-  $('#lName').value = l ? l.name : '';
-  $('#lType').value = l ? l.type : 'residential';
-  $('#lStatus').value = l ? l.status : 'active';
-  $('#lLocation').value = l ? l.location || '' : '';
-  $('#lPrice').value = l ? l.price || '' : '';
-  $('#lOwnerPhone').value = l ? l.ownerPhone || '' : '';
-  $('#lContactPlatform').value = l ? l.contactPlatform || 'whatsapp' : 'whatsapp';
-  $('#lDriveLink').value = l ? l.driveLink || '' : '';
-  $('#lNotes').value = l ? l.notes || '' : '';
-  $('#btnDeleteListing').classList.toggle('hidden', !l);
-  listingModal.classList.remove('hidden');
+const secondaryModal = $('#secondaryModal');
+function openSecondaryModal(id, presetCategory) {
+  const s = id ? secondary.find((x) => x.id === id) : null;
+  $('#secondaryModalTitle').textContent = s ? 'ویرایش ملک' : `ملک ${LABELS.secCategory[presetCategory] || ''} جدید`;
+  $('#sId').value = s ? s.id : '';
+  $('#sCategory').value = s ? s.category : (presetCategory || 'ready');
+  $('#sName').value = s ? s.name : '';
+  $('#sType').value = s ? s.type : 'residential';
+  $('#sStatus').value = s ? s.status : 'active';
+  $('#sLocation').value = s ? s.location || '' : '';
+  $('#sArea').value = s ? s.area || '' : '';
+  $('#sPrice').value = s ? s.price || '' : '';
+  $('#sDescription').value = s ? s.description || '' : '';
+  $('#sOwnerPhone').value = s ? s.ownerPhone || '' : '';
+  $('#sContactPlatform').value = s ? s.contactPlatform || 'whatsapp' : 'whatsapp';
+  $('#sDriveLink').value = s ? s.driveLink || '' : '';
+  $('#btnDeleteSecondary').classList.toggle('hidden', !s);
+  secondaryModal.classList.remove('hidden');
 }
-$('#btnAddListing').addEventListener('click', () => openListingModal(null));
-$('#btnCancelListing').addEventListener('click', () => listingModal.classList.add('hidden'));
-$('#listingForm').addEventListener('submit', (e) => {
+$('#btnCancelSecondary').addEventListener('click', () => secondaryModal.classList.add('hidden'));
+$('#secondaryForm').addEventListener('submit', (e) => {
   e.preventDefault();
-  const id = $('#lId').value || uid();
+  const id = $('#sId').value || uid();
   const data = {
-    id, name: $('#lName').value.trim(), type: $('#lType').value, status: $('#lStatus').value,
-    location: $('#lLocation').value.trim(), price: $('#lPrice').value.trim(),
-    ownerPhone: $('#lOwnerPhone').value.trim(), contactPlatform: $('#lContactPlatform').value,
-    driveLink: $('#lDriveLink').value.trim(), notes: $('#lNotes').value.trim(),
+    id,
+    category: $('#sCategory').value,
+    name: $('#sName').value.trim(),
+    type: $('#sType').value,
+    status: $('#sStatus').value,
+    location: $('#sLocation').value.trim(),
+    area: $('#sArea').value.trim(),
+    price: $('#sPrice').value.trim(),
+    description: $('#sDescription').value.trim(),
+    ownerPhone: $('#sOwnerPhone').value.trim(),
+    contactPlatform: $('#sContactPlatform').value,
+    driveLink: $('#sDriveLink').value.trim(),
   };
-  const idx = listings.findIndex((x) => x.id === id);
-  if (idx >= 0) listings[idx] = data; else listings.push(data);
-  persistListings();
-  listingModal.classList.add('hidden');
-  renderListings(); renderFollowup(); populateAssignedSelect(); renderNewLeads();
+  const idx = secondary.findIndex((x) => x.id === id);
+  if (idx >= 0) secondary[idx] = data; else secondary.push(data);
+  persistSecondary();
+  secondaryModal.classList.add('hidden');
+  renderSecondaryTab(data.category);
+  renderFollowup(); populateAssignedSelect(); renderNewLeads();
 });
-$('#btnDeleteListing').addEventListener('click', () => {
-  const id = $('#lId').value;
-  if (!id || !confirm('این ملک حذف شود؟')) return;
-  listings = listings.filter((x) => x.id !== id);
-  persistListings();
-  listingModal.classList.add('hidden');
-  renderListings(); renderFollowup(); populateAssignedSelect();
+$('#btnDeleteSecondary').addEventListener('click', () => {
+  const id = $('#sId').value;
+  const item = secondary.find((x) => x.id === id);
+  if (!id || !item || !confirm('این ملک حذف شود؟')) return;
+  secondary = secondary.filter((x) => x.id !== id);
+  persistSecondary();
+  secondaryModal.classList.add('hidden');
+  renderSecondaryTab(item.category);
+  renderFollowup(); populateAssignedSelect();
 });
 
 // ==================================================================
@@ -736,7 +835,7 @@ $('#btnDeleteListing').addEventListener('click', () => {
 // ==================================================================
 
 $('#btnExport').addEventListener('click', () => {
-  const payload = { customers, projects, listings, exportedAt: new Date().toISOString() };
+  const payload = { customers, projects, secondary, exportedAt: new Date().toISOString() };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -754,8 +853,8 @@ $('#importFile').addEventListener('change', async (e) => {
     if (!confirm('این کار داده‌های فعلی را با فایل پشتیبان جایگزین می‌کند. ادامه می‌دهید؟')) return;
     customers = payload.customers || [];
     projects = payload.projects || [];
-    listings = payload.listings || [];
-    persistCustomers(); persistProjects(); persistListings();
+    secondary = payload.secondary || payload.listings || [];
+    persistCustomers(); persistProjects(); persistSecondary();
     renderAll();
   } catch {
     alert('فایل پشتیبان معتبر نیست.');
@@ -764,12 +863,18 @@ $('#importFile').addEventListener('change', async (e) => {
 });
 
 // خروجی لیست شماره‌های شناخته‌شده (مشتری‌ها + مالک‌های ثبت‌شده روی ملک‌ها) برای ربات واتساپ متصل به شماره اصلی
-// (whatsapp-bot-clients) — این فایل را دانلود و به صورت دستی جای data/contacts.json در ریپازیتوری commit کنید
-// تا ربات این شماره‌ها را از «مخاطب تازه» تشخیص بدهد و ندهد.
+// (whatsapp-bot-clients) — این فایل را دانلود و به صورت دستی جای data/contacts.json در ریپازیتوری commit کنید.
+// برای هر مالک، عنوان ملک‌های ثبت‌شده‌اش هم فرستاده می‌شه تا ربات بفهمه اگه حرف از یک ملک دیگه زد، تازه‌ست.
 $('#btnExportWatchlist').addEventListener('click', () => {
+  const ownerMap = new Map();
+  secondary.filter((s) => s.ownerPhone).forEach((s) => {
+    const key = normalizePhone(s.ownerPhone);
+    if (!ownerMap.has(key)) ownerMap.set(key, { phone: s.ownerPhone, name: s.name, role: 'owner', properties: [] });
+    ownerMap.get(key).properties.push(s.name);
+  });
   const contacts = [
     ...customers.filter((c) => c.phone).map((c) => ({ phone: c.phone, name: c.name, role: 'customer' })),
-    ...listings.filter((l) => l.ownerPhone).map((l) => ({ phone: l.ownerPhone, name: l.name, role: 'owner' })),
+    ...Array.from(ownerMap.values()),
   ];
   const blob = new Blob([JSON.stringify(contacts, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -794,7 +899,9 @@ function renderAll() {
   renderFollowup();
   renderCustomers();
   renderProjects();
-  renderListings();
+  renderSecondaryTab('presale');
+  renderSecondaryTab('ready');
+  renderSecondaryTab('rent');
   populateAssignedSelect();
 }
 
@@ -802,3 +909,4 @@ renderAll();
 loadContactInsights();
 loadAutoProjects();
 loadNewLeads();
+loadReportsIndex();
