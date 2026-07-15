@@ -1,0 +1,23 @@
+{
+  "name": "maskanyar-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stateless backend (Telegram/WhatsApp listeners, AI extraction, Supabase storage) for the multi-tenant real estate platform. Designed to run on free tiers (Render / Hugging Face Spaces).",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "telegram:login": "node src/telegram/login.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0",
+    "@google/generative-ai": "^0.24.1",
+    "@supabase/supabase-js": "^2.45.4",
+    "@whiskeysockets/baileys": "^6.7.9",
+    "express": "^4.21.2",
+    "googleapis": "^144.0.0",
+    "input": "^1.0.1",
+    "node-telegram-bot-api": "^0.66.0",
+    "qrcode-terminal": "^0.12.0",
+    "teleproto": "^1.228.1"
+  }
+}
