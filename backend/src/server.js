@@ -7,6 +7,14 @@
 const express = require('express');
 const supabase = require('./db/supabaseClient');
 const { startTelegramListener } = require('./telegram/listener');
+const {
+  startWhatsAppConnection,
+  disconnectWhatsApp,
+  getConnectionInfo,
+  resumeAllTenantConnections,
+} = require('./whatsapp/connection');
+const authRoutes = require('./auth/routes');
+const { requireAuth } = require('./auth/middleware');
 
 const app = express();
 app.use(express.json());
@@ -14,6 +22,33 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
 app.get('/health', (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
+
+app.use('/api/auth', authRoutes);
+
+// --- WhatsApp connection endpoints. requireAuth reads the tenant's own
+// userId from the verified JWT (req.userId) — never from the URL or body —
+// so one tenant can never start/stop/inspect another tenant's connection.
+app.post('/api/whatsapp/connect', requireAuth, async (req, res) => {
+  try {
+    await startWhatsAppConnection(req.userId);
+    res.json(getConnectionInfo(req.userId));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/whatsapp/status', requireAuth, (req, res) => {
+  res.json(getConnectionInfo(req.userId));
+});
+
+app.post('/api/whatsapp/disconnect', requireAuth, async (req, res) => {
+  try {
+    await disconnectWhatsApp(req.userId);
+    res.json(getConnectionInfo(req.userId));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // --- Keep-alive: free-tier hosts (Render, Hugging Face Spaces) spin the
 // container down after a period of inbound inactivity. Pinging our own
@@ -52,4 +87,5 @@ app.listen(PORT, () => {
   console.log(`[server] روی پورت ${PORT} در حال اجراست`);
   startKeepAlivePing();
   startAllTenantListeners();
+  resumeAllTenantConnections();
 });

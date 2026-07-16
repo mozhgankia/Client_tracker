@@ -8,7 +8,7 @@
 
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
-const { isLikelyRealEstateMessage } = require('./keywordFilter');
+const { isLikelyRealEstateMessage } = require('../shared/keywordFilter');
 const { extractLeadFromMessage } = require('../ai/geminiExtract');
 const { saveLead } = require('../db/leads');
 

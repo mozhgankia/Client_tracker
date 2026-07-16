@@ -18,7 +18,7 @@ const { StringSession } = require('teleproto/sessions');
 const { NewMessage } = require('teleproto/events');
 
 const { loadSessionString } = require('./sessionStore');
-const { isLikelyRealEstateMessage } = require('./keywordFilter');
+const { isLikelyRealEstateMessage } = require('../shared/keywordFilter');
 const { extractLeadFromMessage } = require('../ai/geminiExtract');
 const { saveLead } = require('../db/leads');
 
