@@ -27,7 +27,7 @@
    - `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`: از https://my.telegram.org.
    - `GOOGLE_SERVICE_ACCOUNT_KEY`/`GOOGLE_DRIVE_PARENT_FOLDER_ID`: طبق راهنمای قبلی گوگل‌درایو.
 3. `npm install`
-4. `npm start` — یا برای دیپلوی، روی Render/Hugging Face Spaces با همین `.env` بالا بیارید و `PUBLIC_URL` رو به آدرس واقعی دیپلوی‌شده ست کنید.
+4. `npm start` — یا برای دیپلوی روی Render، راهنمای کامل قدم‌به‌قدم رو در [`DEPLOY_RENDER.md`](./DEPLOY_RENDER.md) ببینید.
 
 ### اتصال تلگرام هر مستأجر (Tenant)
 

@@ -4,6 +4,9 @@
   "private": true,
   "description": "Stateless backend (Telegram/WhatsApp listeners, AI extraction, Supabase storage) for the multi-tenant real estate platform. Designed to run on free tiers (Render / Hugging Face Spaces).",
   "main": "src/server.js",
+  "engines": {
+    "node": ">=18.18.0"
+  },
   "scripts": {
     "start": "node src/server.js",
     "telegram:login": "node src/telegram/login.js"
