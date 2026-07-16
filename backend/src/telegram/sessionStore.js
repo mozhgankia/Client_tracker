@@ -22,4 +22,9 @@ async function saveSessionString(userId, sessionString) {
   if (error) throw new Error(`ذخیره‌ی نشست تلگرام در Supabase شکست خورد: ${error.message}`);
 }
 
-module.exports = { loadSessionString, saveSessionString };
+async function deleteSessionString(userId) {
+  const { error } = await supabase.from('telegram_sessions').delete().eq('user_id', userId);
+  if (error) throw new Error(`حذف نشست تلگرام از Supabase شکست خورد: ${error.message}`);
+}
+
+module.exports = { loadSessionString, saveSessionString, deleteSessionString };

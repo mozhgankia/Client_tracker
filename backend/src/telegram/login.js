@@ -1,9 +1,12 @@
-// One-time interactive login: run this locally (never on the free-tier
-// server) to create a GramJS session for a tenant. It asks for the phone
-// number, the code Telegram texts/sends in-app, and the 2FA password if the
-// account has one — then saves the resulting session string to Supabase so
-// the always-on listener (listener.js) can pick it up without ever touching
-// local disk.
+// Manual/local fallback login. The primary path is now the dashboard-driven
+// handshake in authFlow.js (POST /api/telegram/connect -> verify-code ->
+// verify-password), which any tenant can use themselves without touching a
+// terminal. This script does the same thing interactively, for local
+// debugging or a tenant who'd rather send you the code out of band. It asks
+// for the phone number, the code Telegram texts/sends in-app, and the 2FA
+// password if the account has one — then saves the resulting session string
+// to Supabase so the always-on listener (listener.js) can pick it up
+// without ever touching local disk.
 //
 // Usage: TENANT_USER_ID=<uuid> node src/telegram/login.js
 'use strict';

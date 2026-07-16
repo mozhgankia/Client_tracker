@@ -11,13 +11,15 @@
 //
 // For a *bot*-based flow instead (simpler, but limited to chats that message
 // the bot directly, or groups where the bot is an admin), see botListener.js.
+// For the phone-number/code/2FA login handshake itself, see authFlow.js —
+// this module only ever starts a listener from an *already saved* session.
 'use strict';
 
-const { TelegramClient } = require('teleproto');
+const { TelegramClient, Api } = require('teleproto');
 const { StringSession } = require('teleproto/sessions');
 const { NewMessage } = require('teleproto/events');
 
-const { loadSessionString } = require('./sessionStore');
+const { loadSessionString, deleteSessionString } = require('./sessionStore');
 const { isLikelyRealEstateMessage } = require('../shared/keywordFilter');
 const { extractLeadFromMessage } = require('../ai/geminiExtract');
 const { saveLead } = require('../db/leads');
@@ -25,19 +27,32 @@ const { saveLead } = require('../db/leads');
 const apiId = Number(process.env.TELEGRAM_API_ID);
 const apiHash = process.env.TELEGRAM_API_HASH;
 
+// One entry per connected tenant: { client, status, phone, username }
+// status: 'connected' | 'disconnected'
+const connections = new Map();
+
+function getConnectionInfo(userId) {
+  const entry = connections.get(userId);
+  if (!entry) return { status: 'disconnected' };
+  return { status: entry.status, phone: entry.phone || null, username: entry.username || null };
+}
+
 /**
- * Starts monitoring for one tenant. Call once per active tenant at server
- * startup (and again whenever a tenant connects Telegram from the dashboard).
+ * Starts monitoring for one tenant from their already-saved session. Call
+ * once per active tenant at server startup, and again right after
+ * authFlow.js finishes a fresh login (so it doesn't wait for a restart).
  * @param {string} userId - the tenant's row id in `users`
  */
 async function startTelegramListener(userId) {
   if (!apiId || !apiHash) {
     throw new Error('TELEGRAM_API_ID و TELEGRAM_API_HASH تنظیم نشده‌اند.');
   }
+  const existing = connections.get(userId);
+  if (existing?.status === 'connected') return existing;
 
   const sessionString = await loadSessionString(userId);
   if (!sessionString) {
-    console.warn(`[telegram] هیچ نشستی برای کاربر ${userId} پیدا نشد — ابتدا login.js را اجرا کنید.`);
+    console.warn(`[telegram] هیچ نشستی برای کاربر ${userId} پیدا نشد — باید از داشبورد وصل بشه.`);
     return null;
   }
 
@@ -46,20 +61,29 @@ async function startTelegramListener(userId) {
   });
   await client.connect();
 
+  const me = await client.getMe();
+  const entry = {
+    client,
+    status: 'connected',
+    phone: me.phone ? `+${me.phone}` : null,
+    username: me.username || null,
+  };
+  connections.set(userId, entry);
+
   client.addEventHandler(async (event) => {
     try {
-      await handleNewMessage(userId, client, event);
+      await handleNewMessage(userId, event);
     } catch (err) {
       // Never let one bad message kill the listener.
       console.error(`[telegram] خطا در پردازش پیام (کاربر ${userId}):`, err.message);
     }
   }, new NewMessage({}));
 
-  console.log(`[telegram] شنود فعال شد برای کاربر ${userId}`);
-  return client;
+  console.log(`[telegram] شنود فعال شد برای کاربر ${userId} (${entry.phone || entry.username})`);
+  return entry;
 }
 
-async function handleNewMessage(userId, client, event) {
+async function handleNewMessage(userId, event) {
   const message = event.message;
   const text = message.message;
   if (!isLikelyRealEstateMessage(text)) return; // cheap filter — skip AI call entirely
@@ -83,4 +107,17 @@ async function handleNewMessage(userId, client, event) {
   console.log(`[telegram] لید تازه ذخیره شد (${extracted.role} / ${extracted.request_type}) از ${senderName || telegramId}`);
 }
 
-module.exports = { startTelegramListener };
+/** Logs the tenant's Telegram account out entirely (dashboard's "Disconnect"
+ * button) — unlike a plain socket close, this revokes the saved session so
+ * reconnecting requires a fresh phone/code/2FA login. */
+async function disconnectTelegram(userId) {
+  const entry = connections.get(userId);
+  if (entry?.client) {
+    await entry.client.invoke(new Api.auth.LogOut()).catch(() => {});
+    await entry.client.disconnect().catch(() => {});
+  }
+  connections.delete(userId);
+  await deleteSessionString(userId);
+}
+
+module.exports = { startTelegramListener, getConnectionInfo, disconnectTelegram };

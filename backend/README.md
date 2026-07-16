@@ -8,9 +8,10 @@
 |---|---|---|
 | API + keep-alive | `src/server.js` | اکسپرس + پینگ خودکار هر ۱۰ دقیقه به `/health` تا سرور رایگان نخوابه |
 | دیتابیس | `src/db/schema.sql`, `src/db/supabaseClient.js` | اسکیمای Postgres + کلاینت مشترک |
-| تلگرام (شنود کامل با اکانت شخصی) | `src/telegram/listener.js` | GramJS — گروه‌ها/کانال‌های خودتون رو مانیتور می‌کنه |
+| تلگرام (شنود کامل با اکانت شخصی) | `src/telegram/listener.js` | مانیتور گروه‌ها/کانال‌ها بعد از لاگین |
+| تلگرام (ورود با شماره/کد/رمز دومرحله‌ای) | `src/telegram/authFlow.js` | همون handshake سه‌مرحله‌ای که از داشبورد صدا زده می‌شه |
 | تلگرام (جایگزین ساده با بات) | `src/telegram/botListener.js` | node-telegram-bot-api + webhook — فقط چت‌هایی که بات توشونه |
-| فیلتر کلمات کلیدی | `src/telegram/keywordFilter.js` | قبل از فرستادن به AI، پیام‌های نامرتبط رو رد می‌کنه |
+| فیلتر کلمات کلیدی | `src/shared/keywordFilter.js` | قبل از فرستادن به AI، پیام‌های نامرتبط رو رد می‌کنه (هم برای تلگرام هم واتساپ) |
 | استخراج سبک (Gemini) | `src/ai/geminiExtract.js` | تشخیص مالک/مشتری + استخراج JSON — ارزان/رایگان |
 | تحلیل سنگین (Claude) | `src/ai/claudeAnalyze.js` | فقط برای گزارش قیمت/تحلیل پیچیده — با Prompt Caching |
 | واتساپ بدون دیسک | `src/whatsapp/supabaseAuthState.js` | جایگزین `useMultiFileAuthState` که همه‌چیز رو در Supabase نگه می‌داره |
@@ -26,11 +27,17 @@
    - `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`: از https://my.telegram.org.
    - `GOOGLE_SERVICE_ACCOUNT_KEY`/`GOOGLE_DRIVE_PARENT_FOLDER_ID`: طبق راهنمای قبلی گوگل‌درایو.
 3. `npm install`
-4. برای هر مستاجر (tenant)، یک‌بار محلی اجرا کنید تا نشست تلگرامش ساخته بشه:
-   ```
-   TENANT_USER_ID=<uuid کاربر> node src/telegram/login.js
-   ```
-5. `npm start` — یا برای دیپلوی، روی Render/Hugging Face Spaces با همین `.env` بالا بیارید و `PUBLIC_URL` رو به آدرس واقعی دیپلوی‌شده ست کنید.
+4. `npm start` — یا برای دیپلوی، روی Render/Hugging Face Spaces با همین `.env` بالا بیارید و `PUBLIC_URL` رو به آدرس واقعی دیپلوی‌شده ست کنید.
+
+### اتصال تلگرام هر مستأجر (Tenant)
+
+راه اصلی، همون سه اندپوینتیه که داشبورد صدا می‌زنه (نیازی به هیچ اسکریپت محلی نیست):
+
+1. `POST /api/telegram/connect` با `{ phone }` → کد به تلگرام کاربر ارسال می‌شه، پاسخ `{ status: "code_pending" }`
+2. `POST /api/telegram/verify-code` با `{ code }` → یا `{ status: "connected" }` برمی‌گرده، یا اگر اکانت رمز دومرحله‌ای داشته باشه `{ status: "password_pending" }`
+3. (فقط در صورت نیاز) `POST /api/telegram/verify-password` با `{ password }` → `{ status: "connected" }`
+
+همه‌ی این‌ها نیاز به هدر `Authorization: Bearer <token>` دارن (از `/api/auth/login`). برای تست دستی محلی بدون داشبورد، `src/telegram/login.js` هم به‌عنوان جایگزین اینتراکتیو ترمینالی باقی مونده.
 
 ## چرا این انتخاب‌ها؟
 
