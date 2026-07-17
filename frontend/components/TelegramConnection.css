@@ -1,0 +1,92 @@
+/* Reuses the design tokens defined in the Phase 1 dashboard mockup
+   (--surface, --border, --accent, --ink, --ink-soft, --radius, --shadow) —
+   include that token block globally before this file. */
+
+.tg-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  max-width: 320px;
+  text-align: center;
+}
+
+.tg-card--error {
+  border-color: var(--critical);
+}
+
+.tg-title {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.tg-label {
+  font-size: 13px;
+  color: var(--ink-soft);
+  text-align: start;
+}
+
+.tg-input {
+  width: 100%;
+  padding: 11px 13px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 14.5px;
+  font-family: inherit;
+}
+
+.tg-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.tg-hint {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+.tg-error-title {
+  font-weight: 700;
+  color: var(--critical);
+}
+
+.tg-error-message {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.tg-phone,
+.tg-username {
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+
+.tg-spinner {
+  width: 28px;
+  height: 28px;
+  align-self: center;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  animation: tg-spin 0.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tg-spinner {
+    animation: none;
+  }
+}
+
+@keyframes tg-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
