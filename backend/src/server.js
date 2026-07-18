@@ -20,6 +20,9 @@ const {
 } = require('./whatsapp/connection');
 const authRoutes = require('./auth/routes');
 const { requireAuth } = require('./auth/middleware');
+const customerRoutes = require('./routes/customers');
+const propertyRoutes = require('./routes/properties');
+const leadRoutes = require('./routes/leads');
 
 const app = express();
 app.use(express.json());
@@ -29,6 +32,14 @@ const PORT = process.env.PORT || 3000;
 app.get('/health', (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
 app.use('/api/auth', authRoutes);
+
+// --- Data CRUD: customers, properties (primary + secondary), and the leads
+// the AI pipeline finds. requireAuth here means req.userId is set for every
+// route in these routers — each one filters/checks ownership on it, so a
+// tenant can only ever see or change their own rows.
+app.use('/api/customers', requireAuth, customerRoutes);
+app.use('/api/properties', requireAuth, propertyRoutes);
+app.use('/api/leads', requireAuth, leadRoutes);
 
 // --- WhatsApp connection endpoints. requireAuth reads the tenant's own
 // userId from the verified JWT (req.userId) — never from the URL or body —

@@ -8,6 +8,9 @@
 |---|---|---|
 | API + keep-alive | `src/server.js` | اکسپرس + پینگ خودکار هر ۱۰ دقیقه به `/health` تا سرور رایگان نخوابه |
 | دیتابیس | `src/db/schema.sql`, `src/db/supabaseClient.js` | اسکیمای Postgres + کلاینت مشترک |
+| CRUD مشتری‌ها | `src/db/customers.js`, `src/routes/customers.js` | `/api/customers` |
+| CRUD ملک‌ها (پرایمری+سکندری) | `src/db/properties.js`, `src/routes/properties.js` | `/api/properties` |
+| لیدها (لیست/رد کردن/تبدیل) | `src/db/leads.js`, `src/routes/leads.js` | `/api/leads` |
 | تلگرام (شنود کامل با اکانت شخصی) | `src/telegram/listener.js` | مانیتور گروه‌ها/کانال‌ها بعد از لاگین |
 | تلگرام (ورود با شماره/کد/رمز دومرحله‌ای) | `src/telegram/authFlow.js` | همون handshake سه‌مرحله‌ای که از داشبورد صدا زده می‌شه |
 | تلگرام (جایگزین ساده با بات) | `src/telegram/botListener.js` | node-telegram-bot-api + webhook — فقط چت‌هایی که بات توشونه |
@@ -38,6 +41,25 @@
 3. (فقط در صورت نیاز) `POST /api/telegram/verify-password` با `{ password }` → `{ status: "connected" }`
 
 همه‌ی این‌ها نیاز به هدر `Authorization: Bearer <token>` دارن (از `/api/auth/login`). برای تست دستی محلی بدون داشبورد، `src/telegram/login.js` هم به‌عنوان جایگزین اینتراکتیو ترمینالی باقی مونده.
+
+### API مشتری‌ها، ملک‌ها و لیدها
+
+هر سه مسیر پشت `requireAuth` هستن (`Authorization: Bearer <token>`) و همیشه فقط داده‌ی همون مستأجر رو نشون می‌دن/تغییر می‌دن.
+
+**`/api/customers`** — CRUD کامل روی جدول `customers`:
+- `GET /` (فیلتر اختیاری: `?type=&subtype=&potential=&status=`)
+- `GET /:id`, `POST /` (`name`+`phone` الزامی), `PATCH /:id`, `DELETE /:id`
+
+**`/api/properties`** — CRUD کامل روی جدول `properties` (هم پرایمری هم سکندری، با فیلد `category`):
+- `GET /` (فیلتر اختیاری: `?category=&sub_category=&delivery_status=`)
+- `GET /:id`, `POST /` (`title`+`category` الزامی), `PATCH /:id`, `DELETE /:id`
+
+**`/api/leads`** — فقط خواندن + رد کردن/تبدیل (لیدها دستی ویرایش نمی‌شن، چون خروجی خودکار هوش مصنوعی هستن):
+- `GET /` (پیش‌فرض فقط `status=new`؛ با `?status=` قابل تغییره)
+- `POST /:id/dismiss` — رد کردن، بدون ساخت رکورد
+- `POST /:id/convert-to-customer` — یک `customer` می‌سازه و لید رو `added` علامت می‌زنه (بدنه‌ی درخواست می‌تونه فیلدهای مشتری رو override کنه)
+- `POST /:id/convert-to-property` — یک `property` می‌سازه (بدنه باید حداقل `category` رو بده)
+- `DELETE /:id`
 
 ## چرا این انتخاب‌ها؟
 

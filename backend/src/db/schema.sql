@@ -26,9 +26,11 @@ create table if not exists customers (
   subtype text,            -- presale | ready
   potential text,          -- high | medium | low
   status text,
+  notes text,              -- free-text interest/responsiveness notes
   first_message_at date,
   last_follow_up_at date,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 create index if not exists customers_user_idx on customers(user_id);
 create index if not exists customers_phone_idx on customers(phone);
@@ -50,7 +52,8 @@ create table if not exists properties (
   drive_folder_link text,
   developer_name text,
   priority int,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 create index if not exists properties_user_idx on properties(user_id);
 create index if not exists properties_owner_phone_idx on properties(owner_phone);
@@ -96,7 +99,13 @@ create table if not exists leads (
   parking boolean,
   raw_message text,
   status text not null default 'new', -- new | added | dismissed
-  created_at timestamptz not null default now()
+  -- Set once a lead is turned into a real record from the dashboard, so it's
+  -- never accidentally added twice and the UI can link back to the result.
+  converted_customer_id uuid references customers(id) on delete set null,
+  converted_property_id uuid references properties(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 create index if not exists leads_user_idx on leads(user_id);
 create index if not exists leads_phone_idx on leads(phone);
+create index if not exists leads_status_idx on leads(status);
