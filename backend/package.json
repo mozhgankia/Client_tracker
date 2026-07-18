@@ -13,11 +13,12 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
-    "@hapi/boom": "^10.0.1",
     "@google/generative-ai": "^0.24.1",
+    "@hapi/boom": "^10.0.1",
     "@supabase/supabase-js": "^2.45.4",
     "@whiskeysockets/baileys": "^6.7.9",
     "bcryptjs": "^2.4.3",
+    "cors": "^2.8.6",
     "express": "^4.21.2",
     "googleapis": "^144.0.0",
     "input": "^1.0.1",

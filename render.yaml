@@ -33,3 +33,5 @@ services:
         sync: false
       - key: PUBLIC_URL
         sync: false
+      - key: CORS_ORIGIN
+        sync: false

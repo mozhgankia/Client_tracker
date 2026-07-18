@@ -5,6 +5,7 @@
 'use strict';
 
 const express = require('express');
+const cors = require('cors');
 const supabase = require('./db/supabaseClient');
 const {
   startTelegramListener,
@@ -25,6 +26,23 @@ const propertyRoutes = require('./routes/properties');
 const leadRoutes = require('./routes/leads');
 
 const app = express();
+
+// The frontend (Vercel) and backend (Render) are deployed on different
+// origins by design (see backend/DEPLOY_RENDER.md) — CORS has to be
+// explicit. CORS_ORIGIN is a comma-separated allowlist (e.g. the Vercel
+// production URL + preview-deploy URLs); with nothing set, allow any
+// origin, which is fine for local development but should always be set in
+// production.
+const allowedOrigins = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+app.use(
+  cors({
+    origin: allowedOrigins.length > 0 ? allowedOrigins : true,
+  })
+);
+
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
