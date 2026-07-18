@@ -22,7 +22,7 @@
 
 ## راه‌اندازی
 
-1. یک پروژه‌ی [Supabase](https://supabase.com) بسازید (پلن رایگان) و `src/db/schema.sql` رو توی SQL Editor اجرا کنید.
+1. یک پروژه‌ی [Supabase](https://supabase.com) بسازید (پلن رایگان) و `src/db/schema.sql` رو توی SQL Editor اجرا کنید — راهنمای کامل قدم‌به‌قدم در [`DEPLOY_SUPABASE.md`](./DEPLOY_SUPABASE.md).
 2. `.env.example` رو کپی کنید به `.env` و مقادیرش رو پر کنید:
    - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`: از تنظیمات پروژه‌ی Supabase.
    - `ANTHROPIC_API_KEY`: همون کلیدی که برای بقیه‌ی بخش‌های پروژه دارید.
