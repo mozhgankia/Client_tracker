@@ -11,6 +11,7 @@
 // visual system without redefining colors here.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { apiUrl } from '../lib/api';
 import './WhatsAppConnection.css';
 
 const STRINGS = {
@@ -55,7 +56,7 @@ const STRINGS = {
 const POLL_INTERVAL_MS = 3000;
 
 async function apiCall(path, method, authToken) {
-  const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}${path}`, {
+  const res = await fetch(apiUrl(path), {
     method,
     headers: { Authorization: `Bearer ${authToken}` },
   });

@@ -13,6 +13,7 @@
 // token, never a userId.
 
 import { useCallback, useEffect, useState } from 'react';
+import { apiUrl } from '../lib/api';
 import './TelegramConnection.css';
 
 const STRINGS = {
@@ -76,7 +77,7 @@ const STRINGS = {
 };
 
 async function apiCall(path, body, authToken) {
-  const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}${path}`, {
+  const res = await fetch(apiUrl(path), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
     body: JSON.stringify(body),
@@ -87,7 +88,7 @@ async function apiCall(path, body, authToken) {
 }
 
 async function apiGet(path, authToken) {
-  const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}${path}`, {
+  const res = await fetch(apiUrl(path), {
     headers: { Authorization: `Bearer ${authToken}` },
   });
   const data = await res.json();
