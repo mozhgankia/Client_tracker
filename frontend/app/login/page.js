@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../lib/AuthContext';
 import { useLanguage } from '../../lib/LanguageContext';
+import { API_BASE_URL } from '../../lib/api';
 
 const STRINGS = {
   fa: {
@@ -153,6 +154,16 @@ export default function LoginPage() {
             >
               {mode === 'login' ? t.switchToSignup : t.switchToLogin}
             </button>
+          </div>
+          {/* TEMPORARY on-screen diagnostic (visible without devtools, for
+              iPad debugging). If you can see this line at all, the NEW build
+              is live; the value shows which backend URL the frontend will
+              call. Remove once the connection works. */}
+          <div
+            className="fineprint"
+            style={{ marginTop: 8, fontSize: 11, wordBreak: 'break-all', direction: 'ltr' }}
+          >
+            🛠 build-2 · API = {API_BASE_URL || '(EMPTY — NEXT_PUBLIC_API_URL not set/deployed)'}
           </div>
         </form>
       </div>

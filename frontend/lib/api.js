@@ -18,6 +18,14 @@ export const API_BASE_URL = (
   ''
 ).replace(/\/+$/, '');
 
+// Debug marker — printed once when this module first loads in the browser, so
+// the deployed build's configured backend URL is visible in the console.
+// A distinctive prefix also proves whether the NEW build is live at all.
+if (typeof window !== 'undefined') {
+  // eslint-disable-next-line no-console
+  console.log('[maskanyar] API_BASE_URL =', API_BASE_URL || '(خالی!)');
+}
+
 /** Joins the configured base URL with an API path, guaranteeing exactly one
  *  slash between them. */
 export function apiUrl(path) {

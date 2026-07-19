@@ -27,53 +27,14 @@ const leadRoutes = require('./routes/leads');
 
 const app = express();
 
-// The frontend (Vercel) and backend (Render) are deployed on different
-// origins by design (see backend/DEPLOY_RENDER.md) — CORS has to be
-// explicit. CORS_ORIGIN is a comma-separated allowlist (e.g. the Vercel
-// production URL + preview-deploy URLs); with nothing set, every origin is
-// reflected (fine for local dev, but always set it in production).
-//
-// Origins are compared with trailing slashes stripped, so it doesn't matter
-// whether CORS_ORIGIN is "https://x.vercel.app" or "https://x.vercel.app/" —
-// a trailing-slash mismatch is the single most common reason a correctly
-// configured allowlist still gets blocked by the browser.
-const stripSlash = (s) => s.replace(/\/+$/, '');
-const allowedOrigins = (process.env.CORS_ORIGIN || '')
-  .split(',')
-  .map((o) => stripSlash(o.trim()))
-  .filter(Boolean);
-
-function isAllowedOrigin(origin) {
-  // Non-browser callers (curl, health checks, server-to-server) send no
-  // Origin header — always allow those.
-  if (!origin) return true;
-  // No allowlist configured → reflect whatever origin asked (allow all).
-  if (allowedOrigins.length === 0) return true;
-  // Explicit allowlist match (trailing slash ignored).
-  if (allowedOrigins.includes(stripSlash(origin))) return true;
-  // Vercel gives every deploy its own hashed *.vercel.app URL that changes on
-  // each push (e.g. client-tracker-<hash>-<user>.vercel.app), so allow any of
-  // them — otherwise a new frontend deploy would need a CORS_ORIGIN edit every
-  // single time. The API itself is still protected by the JWT on every
-  // tenant-scoped route; CORS only governs which browser origins may call it.
-  try {
-    if (new URL(origin).hostname.endsWith('.vercel.app')) return true;
-  } catch {
-    /* not a valid URL — fall through to reject */
-  }
-  return false;
-}
-
-const corsOptions = {
-  origin(origin, callback) {
-    const ok = isAllowedOrigin(origin);
-    if (!ok) console.warn(`[cors] rejected origin: ${origin} (allowed: ${allowedOrigins.join(', ') || '(all)'})`);
-    return callback(null, ok);
-  },
-};
-
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // answer every preflight (OPTIONS) request explicitly
+// TEMPORARY (debugging): allow ALL origins so CORS can be ruled out entirely
+// while we track down the deploy issue. This is safe short-term because every
+// tenant-scoped route is still protected by the JWT — CORS only governs which
+// browser origins may call the API, not whether the caller is authorized.
+// Once the connection works end to end, tighten this back to an allowlist
+// (see git history for the origin-function version).
+app.use(cors({ origin: '*' }));
+app.options('*', cors({ origin: '*' }));
 
 app.use(express.json());
 
