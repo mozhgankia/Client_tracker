@@ -43,15 +43,31 @@ const allowedOrigins = (process.env.CORS_ORIGIN || '')
   .map((o) => stripSlash(o.trim()))
   .filter(Boolean);
 
+function isAllowedOrigin(origin) {
+  // Non-browser callers (curl, health checks, server-to-server) send no
+  // Origin header — always allow those.
+  if (!origin) return true;
+  // No allowlist configured → reflect whatever origin asked (allow all).
+  if (allowedOrigins.length === 0) return true;
+  // Explicit allowlist match (trailing slash ignored).
+  if (allowedOrigins.includes(stripSlash(origin))) return true;
+  // Vercel gives every deploy its own hashed *.vercel.app URL that changes on
+  // each push (e.g. client-tracker-<hash>-<user>.vercel.app), so allow any of
+  // them — otherwise a new frontend deploy would need a CORS_ORIGIN edit every
+  // single time. The API itself is still protected by the JWT on every
+  // tenant-scoped route; CORS only governs which browser origins may call it.
+  try {
+    if (new URL(origin).hostname.endsWith('.vercel.app')) return true;
+  } catch {
+    /* not a valid URL — fall through to reject */
+  }
+  return false;
+}
+
 const corsOptions = {
   origin(origin, callback) {
-    // Non-browser callers (curl, health checks, server-to-server) send no
-    // Origin header — always allow those.
-    if (!origin) return callback(null, true);
-    // No allowlist configured → reflect whatever origin asked (allow all).
-    if (allowedOrigins.length === 0) return callback(null, true);
-    const ok = allowedOrigins.includes(stripSlash(origin));
-    if (!ok) console.warn(`[cors] rejected origin: ${origin} (allowed: ${allowedOrigins.join(', ')})`);
+    const ok = isAllowedOrigin(origin);
+    if (!ok) console.warn(`[cors] rejected origin: ${origin} (allowed: ${allowedOrigins.join(', ') || '(all)'})`);
     return callback(null, ok);
   },
 };

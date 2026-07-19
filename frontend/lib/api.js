@@ -25,18 +25,50 @@ export function apiUrl(path) {
   return `${API_BASE_URL}${suffix}`;
 }
 
+/** Resolves an API path to the ABSOLUTE url the browser will actually hit.
+ *  When API_BASE_URL is empty this returns the current origin + path, which
+ *  is exactly the clue we want in error messages — it makes "the frontend
+ *  never learned the backend URL" visually obvious on-device. */
+function absoluteUrl(path) {
+  const u = apiUrl(path);
+  if (typeof window !== 'undefined') {
+    try {
+      return new URL(u, window.location.origin).href;
+    } catch {
+      /* fall through */
+    }
+  }
+  return u;
+}
+
 export async function apiFetch(path, { method = 'GET', body, token } = {}) {
-  const res = await fetch(apiUrl(path), {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  const target = absoluteUrl(path);
+  let res;
+  try {
+    res = await fetch(apiUrl(path), {
+      method,
+      mode: 'cors', // explicit (this is already the default for cross-origin requests)
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch (err) {
+    // A network-level failure (CORS block, wrong/unreachable host, DNS,
+    // mixed content) rejects the fetch here — before any HTTP status exists.
+    // Surface the exact URL + base so the on-screen red message is
+    // self-diagnostic (no browser devtools needed).
+    throw new Error(
+      `اتصال ناموفق به «${target}» — ${err.message}. ` +
+        `(آدرس پایه‌ی بک‌اند: ${API_BASE_URL || '❗️خالی است — متغیر NEXT_PUBLIC_API_URL در Vercel تنظیم/دیپلوی نشده'})`
+    );
+  }
 
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `درخواست ${path} شکست خورد`);
+  if (!res.ok) {
+    throw new Error(data.error || `درخواست «${target}» با کد ${res.status} شکست خورد`);
+  }
   return data;
 }

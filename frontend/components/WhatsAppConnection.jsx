@@ -58,6 +58,7 @@ const POLL_INTERVAL_MS = 3000;
 async function apiCall(path, method, authToken) {
   const res = await fetch(apiUrl(path), {
     method,
+    mode: 'cors',
     headers: { Authorization: `Bearer ${authToken}` },
   });
   const body = await res.json();
