@@ -49,6 +49,7 @@ Supabase (دیتابیس)  ←  Render (بک‌اند/API)  ←  Vercel (فرا�
 
 | نشانه | علت محتمل | راه حل |
 |---|---|---|
+| دیپلوی Vercel با خطای `No Output Directory named "out" found` شکست می‌خورد | `Root Directory` در Vercel روی `frontend` تنظیم نشده (Vercel `package.json` ریشه را می‌بیند) | Vercel → Settings → General → Root Directory = `frontend` → Save → Redeploy |
 | صفحه‌ی ورود می‌آید ولی ثبت‌نام خطای «Failed to fetch» می‌دهد | `NEXT_PUBLIC_API_BASE_URL` در Vercel اشتباه/خالی است | آدرس Render را درست وارد و دوباره Deploy کنید |
 | خطای CORS در Console مرورگر | `CORS_ORIGIN` در Render آدرس Vercel را ندارد | آدرس دقیق Vercel را در `CORS_ORIGIN` بگذارید |
 | اولین درخواست خیلی کند است (چند ثانیه) | سرویس رایگان Render خوابیده بوده | طبیعی است؛ پینگ خودکار ما بعد از ست‌شدن `PUBLIC_URL` جلویش را می‌گیرد |

@@ -11,10 +11,12 @@
 4. در صفحه‌ی تنظیمات پروژه:
    | فیلد | مقدار |
    |---|---|
-   | **Root Directory** | `frontend` (روی **Edit** بزنید و این پوشه را انتخاب کنید) |
+   | **Root Directory** | ⚠️ **حتماً روی `frontend` بگذارید** (روی **Edit** بزنید و این پوشه را انتخاب کنید) |
    | **Framework Preset** | `Next.js` (خودش تشخیص می‌دهد) |
    | **Build Command** | پیش‌فرض (`next build`) — دست نزنید |
    | **Output Directory** | پیش‌فرض — دست نزنید |
+
+   > ‼️ **مهم‌ترین تنظیم اینجا `Root Directory` است.** ریشه‌ی ریپازیتوری یک `package.json` قدیمی (مربوط به اسکریپت‌های ربات) دارد که Next.js نیست. اگر Root Directory را روی `frontend` نگذارید، Vercel آن `package.json` ریشه را می‌بیند و با خطای `No Output Directory named "out" found` شکست می‌خورد. فایل `frontend/vercel.json` هم که در ریپو هست، بعد از تنظیم Root Directory، فریم‌ورک را صریحاً Next.js اعلام می‌کند.
 
 ## ۲. متغیر محیطی (مهم‌ترین قدم)
 پایین همان صفحه، بخش **Environment Variables**:
