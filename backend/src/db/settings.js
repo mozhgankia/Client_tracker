@@ -21,6 +21,19 @@ const DEFAULT_CLIENT_KEYWORDS = [
   'أبحث', 'أريد', 'مطلوب', 'مستأجر', 'مشتري',
 ];
 
+// A PostgREST "table not present in the schema cache" error — happens when the
+// user_settings migration hasn't been run on this Supabase project yet. We
+// treat it as "no custom settings" and fall back to defaults, so the settings
+// and classification pages keep working instead of crashing.
+function isMissingTable(error) {
+  return (
+    error &&
+    (error.code === 'PGRST205' ||
+      error.code === '42P01' ||
+      /schema cache|could not find the table/i.test(error.message || ''))
+  );
+}
+
 /** Returns the tenant's settings, filling any empty list with the defaults so
  *  callers always get usable keyword lists. */
 async function getSettings(userId) {
@@ -29,7 +42,12 @@ async function getSettings(userId) {
     .select('owner_keywords, client_keywords')
     .eq('user_id', userId)
     .maybeSingle();
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (isMissingTable(error)) {
+      return { owner_keywords: DEFAULT_OWNER_KEYWORDS, client_keywords: DEFAULT_CLIENT_KEYWORDS, customized: false };
+    }
+    throw new Error(error.message);
+  }
 
   const owner = data?.owner_keywords?.length ? data.owner_keywords : DEFAULT_OWNER_KEYWORDS;
   const client = data?.client_keywords?.length ? data.client_keywords : DEFAULT_CLIENT_KEYWORDS;
@@ -52,7 +70,14 @@ async function updateSettings(userId, patch = {}) {
     updated_at: new Date().toISOString(),
   };
   const { error } = await supabase.from('user_settings').upsert(row, { onConflict: 'user_id' });
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (isMissingTable(error)) {
+      const e = new Error('جدول تنظیمات هنوز در دیتابیس ساخته نشده است. لطفاً schema.sql را در Supabase اجرا کنید.');
+      e.code = 'settings_table_missing';
+      throw e;
+    }
+    throw new Error(error.message);
+  }
   return { owner_keywords: row.owner_keywords, client_keywords: row.client_keywords, customized: true };
 }
 

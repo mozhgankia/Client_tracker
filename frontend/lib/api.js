@@ -76,7 +76,9 @@ export async function apiFetch(path, { method = 'GET', body, token } = {}) {
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.error || `درخواست «${target}» با کد ${res.status} شکست خورد`);
+    const err = new Error(data.error || `درخواست «${target}» با کد ${res.status} شکست خورد`);
+    err.code = data.code; // stable code so callers can translate the message
+    throw err;
   }
   return data;
 }

@@ -194,6 +194,19 @@ button:focus-visible, .navitem:focus-visible {
   background: var(--critical-soft); color: var(--critical); border-radius: 8px;
   padding: 10px 12px; font-size: 13px; margin-bottom: 14px;
 }
+.form-notice {
+  background: var(--success-soft); color: var(--success); border-radius: 8px;
+  padding: 10px 12px; font-size: 13px; margin-bottom: 14px;
+}
+/* password field with a show/hide eye toggle */
+.password-field { position: relative; }
+.password-field input { padding-inline-end: 42px; }
+.pass-toggle {
+  position: absolute; inset-inline-end: 8px; top: 50%; transform: translateY(-50%);
+  border: none; background: transparent; color: var(--ink-faint);
+  display: flex; align-items: center; justify-content: center; padding: 6px; border-radius: 6px;
+}
+.pass-toggle:hover { color: var(--ink-soft); }
 
 /* ---------- App shell ---------- */
 .app-shell { display: flex; min-height: 100vh; }

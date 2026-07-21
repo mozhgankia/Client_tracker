@@ -26,7 +26,7 @@ router.put('/', async (req, res) => {
     }
     res.json(await updateSettings(req.userId, { owner_keywords, client_keywords }));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.code === 'settings_table_missing' ? 400 : 500).json({ code: err.code, error: err.message });
   }
 });
 

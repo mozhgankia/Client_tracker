@@ -121,6 +121,16 @@ create table if not exists user_settings (
   updated_at timestamptz not null default now()
 );
 
+-- Single-use password-reset tokens (emailed to the user). Rows are deleted on
+-- use and ignored once expired.
+create table if not exists password_resets (
+  token text primary key,
+  user_id uuid not null references users(id) on delete cascade,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists password_resets_user_idx on password_resets(user_id);
+
 -- Force Supabase's API layer (PostgREST) to reload its schema cache, so the
 -- newly-created tables are visible immediately. Without this you can hit
 -- "Could not find the table 'public.users' in the schema cache" for a short
