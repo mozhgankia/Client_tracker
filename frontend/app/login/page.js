@@ -4,13 +4,14 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../lib/AuthContext';
 import { useLanguage } from '../../lib/LanguageContext';
-import { API_BASE_URL } from '../../lib/api';
+import BurjKhalifa from '../../components/BurjKhalifa';
 
 const STRINGS = {
   fa: {
-    brand: 'مسکن‌یار',
-    headline: 'هر مشتری و هر ملک، دقیقاً همون لحظه‌ای که باید پیگیری بشه.',
-    sub: 'پیگیری خودکار مشتری‌ها، پروژه‌های پیش‌فروش و بازار ثانویه — همه در یک داشبورد.',
+    brand: 'Estatemate',
+    eyebrow: 'نخستین سیستمِ اتوماسیونِ هوشمندِ املاک در دبی',
+    headline: 'بستنِ قراردادهای بزرگ، هنرِ صبر و استمرار است. مسیرِ موفقیت را با نظم و آرامش طی کنید.',
+    sub: 'تحلیلِ خودکارِ چت‌های واتساپ و تلگرام — هیچ مشتری و ملکی را از دست ندهید.',
     welcomeLogin: 'خوش اومدید',
     welcomeSignup: 'ساخت حساب جدید',
     subLogin: 'وارد حساب کاربری خودتون بشید',
@@ -25,9 +26,10 @@ const STRINGS = {
     submitting: 'در حال ارسال...',
   },
   en: {
-    brand: 'MaskanYar',
-    headline: 'Every client and every property, followed up exactly when it matters.',
-    sub: 'Automatic follow-up for clients, off-plan projects, and the secondary market — all in one dashboard.',
+    brand: 'Estatemate',
+    eyebrow: 'Dubai’s first smart real-estate automation system',
+    headline: 'Closing big deals is the art of patience and persistence. Walk the path to success with order and calm.',
+    sub: 'Automatic analysis of WhatsApp & Telegram chats — never miss a client or a property again.',
     welcomeLogin: 'Welcome back',
     welcomeSignup: 'Create an account',
     subLogin: 'Sign in to your account',
@@ -42,9 +44,10 @@ const STRINGS = {
     submitting: 'Submitting...',
   },
   ar: {
-    brand: 'مسكن يار',
-    headline: 'كل عميل وكل عقار، تتم متابعته بالضبط في الوقت المناسب.',
-    sub: 'متابعة تلقائية للعملاء ومشاريع ما قبل الإنجاز والسوق الثانوي — كل ذلك في لوحة تحكم واحدة.',
+    brand: 'Estatemate',
+    eyebrow: 'أول نظام أتمتة عقارية ذكي في دبي',
+    headline: 'إبرام الصفقات الكبيرة فنُّ الصبر والمثابرة. اسلك طريق النجاح بنظامٍ وهدوء.',
+    sub: 'تحليل تلقائي لمحادثات واتساب وتيليجرام — لا تفوّت أي عميل أو عقار بعد الآن.',
     welcomeLogin: 'مرحباً بعودتك',
     welcomeSignup: 'إنشاء حساب جديد',
     subLogin: 'سجّل الدخول إلى حسابك',
@@ -96,14 +99,16 @@ export default function LoginPage() {
     <div className="login-screen">
       <div className="login-visual">
         <div className="brandmark">
-          <div className="mark">م</div>
+          <div className="mark">E</div>
           <div className="name">{t.brand}</div>
         </div>
         <div className="pitch">
+          <span className="eyebrow">{t.eyebrow}</span>
           <h1>{t.headline}</h1>
           <p>{t.sub}</p>
         </div>
         <div />
+        <BurjKhalifa className="burj-hero" />
       </div>
       <div className="login-form-wrap">
         <div className="lang-switch" style={{ position: 'absolute', top: 20, insetInlineEnd: 20 }}>
@@ -154,16 +159,6 @@ export default function LoginPage() {
             >
               {mode === 'login' ? t.switchToSignup : t.switchToLogin}
             </button>
-          </div>
-          {/* TEMPORARY on-screen diagnostic (visible without devtools, for
-              iPad debugging). If you can see this line at all, the NEW build
-              is live; the value shows which backend URL the frontend will
-              call. Remove once the connection works. */}
-          <div
-            className="fineprint"
-            style={{ marginTop: 8, fontSize: 11, wordBreak: 'break-all', direction: 'ltr' }}
-          >
-            🛠 build-2 · API = {API_BASE_URL || '(EMPTY — NEXT_PUBLIC_API_URL not set/deployed)'}
           </div>
         </form>
       </div>

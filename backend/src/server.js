@@ -24,6 +24,7 @@ const { requireAuth } = require('./auth/middleware');
 const customerRoutes = require('./routes/customers');
 const propertyRoutes = require('./routes/properties');
 const leadRoutes = require('./routes/leads');
+const { importWhatsAppExport } = require('./import/importWhatsAppExport');
 
 const app = express();
 
@@ -51,6 +52,31 @@ app.use('/api/auth', authRoutes);
 app.use('/api/customers', requireAuth, customerRoutes);
 app.use('/api/properties', requireAuth, propertyRoutes);
 app.use('/api/leads', requireAuth, leadRoutes);
+
+// --- Back-fill: import an exported WhatsApp chat (.txt) and run every message
+// through the same keyword-filter -> Gemini -> saveLead pipeline as live
+// messages, so old conversations produce the same review-ready leads. The
+// file is sent as a raw text body (not JSON) so large exports don't pay the
+// cost of JSON-escaping; express.text parses it just for this route. The
+// tenant is always req.userId from the verified JWT.
+app.post(
+  '/api/import/whatsapp',
+  requireAuth,
+  express.text({ type: () => true, limit: '15mb' }),
+  async (req, res) => {
+    try {
+      const content = req.body;
+      if (typeof content !== 'string' || content.trim().length < 10) {
+        return res.status(400).json({ error: 'فایل اکسپورت خالی یا نامعتبر است.' });
+      }
+      const label = typeof req.query.label === 'string' ? req.query.label : undefined;
+      const stats = await importWhatsAppExport(req.userId, content, { chatLabel: label });
+      res.json(stats);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
 
 // --- WhatsApp connection endpoints. requireAuth reads the tenant's own
 // userId from the verified JWT (req.userId) — never from the URL or body —

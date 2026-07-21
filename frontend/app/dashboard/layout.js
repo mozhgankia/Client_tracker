@@ -5,31 +5,35 @@ import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '../../lib/AuthContext';
 import { useLanguage } from '../../lib/LanguageContext';
+import BurjKhalifa from '../../components/BurjKhalifa';
 
 const STRINGS = {
   fa: {
-    brand: 'مسکن‌یار',
+    brand: 'Estatemate',
     customers: 'مشتری‌ها',
     properties: 'ملک‌ها',
     leads: 'لیدهای تازه',
+    import: 'ورود چت‌ها',
     connections: 'اتصالات',
     role: 'مشاور املاک',
     logout: 'خروج',
   },
   en: {
-    brand: 'MaskanYar',
+    brand: 'Estatemate',
     customers: 'Clients',
     properties: 'Properties',
     leads: 'New leads',
+    import: 'Import chats',
     connections: 'Connections',
     role: 'Real estate agent',
     logout: 'Log out',
   },
   ar: {
-    brand: 'مسكن يار',
+    brand: 'Estatemate',
     customers: 'العملاء',
     properties: 'العقارات',
     leads: 'عملاء محتملون جدد',
+    import: 'استيراد المحادثات',
     connections: 'الاتصالات',
     role: 'وسيط عقاري',
     logout: 'تسجيل الخروج',
@@ -40,6 +44,7 @@ const NAV_ITEMS = [
   { href: '/dashboard/customers', key: 'customers', icon: '◇' },
   { href: '/dashboard/properties', key: 'properties', icon: '▲' },
   { href: '/dashboard/leads', key: 'leads', icon: '◆' },
+  { href: '/dashboard/import', key: 'import', icon: '📥' },
   { href: '/dashboard/connections', key: 'connections', icon: '⇄' },
 ];
 
@@ -60,7 +65,7 @@ export default function DashboardLayout({ children }) {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brandmark">
-          <div className="mark">م</div>
+          <div className="mark">E</div>
           <div className="name">{t.brand}</div>
         </div>
 
@@ -74,6 +79,10 @@ export default function DashboardLayout({ children }) {
               <span className="ic">{item.icon}</span> {t[item.key]}
             </Link>
           ))}
+        </div>
+
+        <div className="sidebar-deco">
+          <BurjKhalifa />
         </div>
 
         <div className="sidebar-foot">

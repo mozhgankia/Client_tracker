@@ -80,3 +80,33 @@ export async function apiFetch(path, { method = 'GET', body, token } = {}) {
   }
   return data;
 }
+
+/** Uploads a raw text body (e.g. a WhatsApp export file's contents) to an API
+ *  path. Kept separate from apiFetch because that one always sends JSON; here
+ *  the body is text/plain so the server can stream a large file without
+ *  JSON-escaping it. Returns the parsed JSON response. */
+export async function apiPostText(path, text, { token } = {}) {
+  const target = absoluteUrl(path);
+  let res;
+  try {
+    res = await fetch(apiUrl(path), {
+      method: 'POST',
+      mode: 'cors',
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: text,
+    });
+  } catch (err) {
+    throw new Error(
+      `اتصال ناموفق به «${target}» — ${err.message}. ` +
+        `(آدرس پایه‌ی بک‌اند: ${API_BASE_URL || '❗️خالی است — متغیر NEXT_PUBLIC_API_URL در Vercel تنظیم/دیپلوی نشده'})`
+    );
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || `درخواست «${target}» با کد ${res.status} شکست خورد`);
+  }
+  return data;
+}

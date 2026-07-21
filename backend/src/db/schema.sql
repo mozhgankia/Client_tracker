@@ -5,11 +5,11 @@
 --     pre-keys/sessions itself, so this table stays small per active session
 --   * indexes are limited to columns actually queried by the backend
 
-create extension if not exists "uuid-ossp";
+-- gen_random_uuid() در Postgres 13+ (و Supabase) به‌صورت درون‌ساخت موجود است و به هیچ افزونه‌ای نیاز ندارد.
 
 -- One row per agent/tenant using the platform.
 create table if not exists users (
-  id uuid primary key default uuid_generate_v4(),
+  id uuid primary key default gen_random_uuid(),
   email text unique not null,
   password_hash text not null,
   full_name text,
@@ -18,7 +18,7 @@ create table if not exists users (
 
 -- Buyer/tenant-side contacts, scoped to a tenant (user_id).
 create table if not exists customers (
-  id uuid primary key default uuid_generate_v4(),
+  id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,
   name text not null,
   phone text not null,
@@ -37,7 +37,7 @@ create index if not exists customers_phone_idx on customers(phone);
 
 -- Primary (developer) + secondary (owner-resale) listings, scoped to a tenant.
 create table if not exists properties (
-  id uuid primary key default uuid_generate_v4(),
+  id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,
   category text not null,       -- primary | secondary
   sub_category text,            -- presale | ready | rent (secondary only)
@@ -83,7 +83,7 @@ create table if not exists telegram_sessions (
 -- One row per distinct (phone/telegram id + property) combination, mirroring
 -- the compound-key dedup already used for WhatsApp new-leads.
 create table if not exists leads (
-  id uuid primary key default uuid_generate_v4(),
+  id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,
   source text not null,           -- telegram | whatsapp
   source_chat_id text,
@@ -109,3 +109,10 @@ create table if not exists leads (
 create index if not exists leads_user_idx on leads(user_id);
 create index if not exists leads_phone_idx on leads(phone);
 create index if not exists leads_status_idx on leads(status);
+
+-- Force Supabase's API layer (PostgREST) to reload its schema cache, so the
+-- newly-created tables are visible immediately. Without this you can hit
+-- "Could not find the table 'public.users' in the schema cache" for a short
+-- while after creating tables. This is a harmless no-op on a plain Postgres
+-- that isn't running PostgREST.
+notify pgrst, 'reload schema';
