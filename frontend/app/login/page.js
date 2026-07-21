@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../lib/AuthContext';
 import { useLanguage } from '../../lib/LanguageContext';
-import BurjKhalifa from '../../components/BurjKhalifa';
+import DubaiBackdrop from '../../components/DubaiBackdrop';
 
 const STRINGS = {
   fa: {
@@ -98,6 +98,7 @@ export default function LoginPage() {
   return (
     <div className="login-screen">
       <div className="login-visual">
+        <DubaiBackdrop variant="login" />
         <div className="brandmark">
           <div className="mark">E</div>
           <div className="name">{t.brand}</div>
@@ -108,7 +109,6 @@ export default function LoginPage() {
           <p>{t.sub}</p>
         </div>
         <div />
-        <BurjKhalifa className="burj-hero" />
       </div>
       <div className="login-form-wrap">
         <div className="lang-switch" style={{ position: 'absolute', top: 20, insetInlineEnd: 20 }}>

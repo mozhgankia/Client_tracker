@@ -8,6 +8,8 @@
 const { isLikelyRealEstateMessage } = require('../shared/keywordFilter');
 const { extractLeadFromMessage } = require('../ai/geminiExtract');
 const { saveLead } = require('../db/leads');
+const { getSettings } = require('../db/settings');
+const { resolveRole } = require('../classify/classifier');
 const { parseWhatsAppExport } = require('./whatsappExportParser');
 
 // A sender that is a bare phone number (common when the contact isn't saved).
@@ -31,6 +33,9 @@ const CONCURRENCY = 3;
  */
 async function importWhatsAppExport(userId, content, opts = {}) {
   const chatLabel = opts.chatLabel || 'import';
+  // Fetch the tenant's classifier keywords once for the whole import (rather
+  // than per message) so unknown-role leads still get bucketed by keyword.
+  const settings = await getSettings(userId);
   const messages = parseWhatsAppExport(content);
   const candidates = messages.filter((m) => isLikelyRealEstateMessage(m.text));
   const capped = candidates.slice(0, MAX_AI_CALLS);
@@ -56,6 +61,8 @@ async function importWhatsAppExport(userId, content, opts = {}) {
           stats.irrelevant++;
           continue;
         }
+        // Let the tenant's editable keywords break ties the AI left as unknown.
+        extracted.role = resolveRole(extracted, m.text, settings);
         const isPhone = PHONE_RE.test(m.sender);
         await saveLead(userId, extracted, {
           source: 'whatsapp',

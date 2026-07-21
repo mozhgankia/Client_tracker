@@ -49,6 +49,34 @@ async function getLead(userId, id) {
   return data;
 }
 
+/** All non-dismissed leads for a tenant, grouped by role for the
+ *  classification board (owners / clients / unknown). */
+async function listActiveLeads(userId) {
+  const { data, error } = await supabase
+    .from('leads')
+    .select('*')
+    .eq('user_id', userId)
+    .neq('status', 'dismissed')
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+/** Sets a lead's role (used when the user accepts an AI suggestion or manually
+ *  reclassifies a contact). */
+async function setLeadRole(userId, id, role) {
+  if (!['owner', 'client', 'unknown'].includes(role)) throw new Error('نقش نامعتبر است.');
+  const { data, error } = await supabase
+    .from('leads')
+    .update({ role, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('user_id', userId)
+    .select()
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
 /** Dismiss (or otherwise re-flag) a lead without turning it into a record. */
 async function updateLeadStatus(userId, id, status) {
   const { data, error } = await supabase
@@ -128,6 +156,8 @@ async function convertLeadToProperty(userId, id, overrides = {}) {
 module.exports = {
   saveLead,
   listLeads,
+  listActiveLeads,
+  setLeadRole,
   getLead,
   updateLeadStatus,
   deleteLead,

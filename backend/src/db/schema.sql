@@ -110,6 +110,17 @@ create index if not exists leads_user_idx on leads(user_id);
 create index if not exists leads_phone_idx on leads(phone);
 create index if not exists leads_status_idx on leads(status);
 
+-- Per-tenant classification settings. The intelligent classifier uses these
+-- editable keyword lists to decide, without an AI call, whether a contact is
+-- an owner (listing/selling) or a client (buying/renting). Empty lists mean
+-- "fall back to the app defaults" (see backend/src/db/settings.js).
+create table if not exists user_settings (
+  user_id uuid primary key references users(id) on delete cascade,
+  owner_keywords text[] not null default '{}',
+  client_keywords text[] not null default '{}',
+  updated_at timestamptz not null default now()
+);
+
 -- Force Supabase's API layer (PostgREST) to reload its schema cache, so the
 -- newly-created tables are visible immediately. Without this you can hit
 -- "Could not find the table 'public.users' in the schema cache" for a short

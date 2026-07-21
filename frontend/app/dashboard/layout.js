@@ -10,42 +10,54 @@ import BurjKhalifa from '../../components/BurjKhalifa';
 const STRINGS = {
   fa: {
     brand: 'Estatemate',
+    today: 'پیگیری امروز',
     customers: 'مشتری‌ها',
     properties: 'ملک‌ها',
     leads: 'لیدهای تازه',
+    classification: 'دسته‌بندی',
     import: 'ورود چت‌ها',
     connections: 'اتصالات',
+    settings: 'تنظیمات',
     role: 'مشاور املاک',
     logout: 'خروج',
   },
   en: {
     brand: 'Estatemate',
+    today: 'Today',
     customers: 'Clients',
     properties: 'Properties',
     leads: 'New leads',
+    classification: 'Classification',
     import: 'Import chats',
     connections: 'Connections',
+    settings: 'Settings',
     role: 'Real estate agent',
     logout: 'Log out',
   },
   ar: {
     brand: 'Estatemate',
+    today: 'اليوم',
     customers: 'العملاء',
     properties: 'العقارات',
     leads: 'عملاء محتملون جدد',
+    classification: 'التصنيف',
     import: 'استيراد المحادثات',
     connections: 'الاتصالات',
+    settings: 'الإعدادات',
     role: 'وسيط عقاري',
     logout: 'تسجيل الخروج',
   },
 };
 
 const NAV_ITEMS = [
+  { href: '/dashboard', key: 'today', icon: '☀' },
   { href: '/dashboard/customers', key: 'customers', icon: '◇' },
   { href: '/dashboard/properties', key: 'properties', icon: '▲' },
   { href: '/dashboard/leads', key: 'leads', icon: '◆' },
+  { href: '/dashboard/classification', key: 'classification', icon: '🧠' },
   { href: '/dashboard/import', key: 'import', icon: '📥' },
   { href: '/dashboard/connections', key: 'connections', icon: '⇄' },
+  { href: '/dashboard/settings', key: 'settings', icon: '⚙' },
 ];
 
 export default function DashboardLayout({ children }) {
@@ -74,7 +86,11 @@ export default function DashboardLayout({ children }) {
             <Link
               key={item.href}
               href={item.href}
-              className={`navitem${pathname.startsWith(item.href) ? ' active' : ''}`}
+              className={`navitem${
+                (item.href === '/dashboard' ? pathname === '/dashboard' : pathname.startsWith(item.href))
+                  ? ' active'
+                  : ''
+              }`}
             >
               <span className="ic">{item.icon}</span> {t[item.key]}
             </Link>

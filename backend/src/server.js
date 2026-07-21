@@ -24,6 +24,8 @@ const { requireAuth } = require('./auth/middleware');
 const customerRoutes = require('./routes/customers');
 const propertyRoutes = require('./routes/properties');
 const leadRoutes = require('./routes/leads');
+const settingsRoutes = require('./routes/settings');
+const classificationRoutes = require('./routes/classification');
 const { importWhatsAppExport } = require('./import/importWhatsAppExport');
 
 const app = express();
@@ -52,6 +54,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/customers', requireAuth, customerRoutes);
 app.use('/api/properties', requireAuth, propertyRoutes);
 app.use('/api/leads', requireAuth, leadRoutes);
+app.use('/api/settings', requireAuth, settingsRoutes);
+app.use('/api/classification', requireAuth, classificationRoutes);
 
 // --- Back-fill: import an exported WhatsApp chat (.txt) and run every message
 // through the same keyword-filter -> Gemini -> saveLead pipeline as live

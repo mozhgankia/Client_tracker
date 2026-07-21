@@ -23,6 +23,8 @@ const { loadSessionString, deleteSessionString } = require('./sessionStore');
 const { isLikelyRealEstateMessage } = require('../shared/keywordFilter');
 const { extractLeadFromMessage } = require('../ai/geminiExtract');
 const { saveLead } = require('../db/leads');
+const { getSettings } = require('../db/settings');
+const { resolveRole } = require('../classify/classifier');
 
 const apiId = Number(process.env.TELEGRAM_API_ID);
 const apiHash = process.env.TELEGRAM_API_HASH;
@@ -94,6 +96,9 @@ async function handleNewMessage(userId, event) {
 
   const extracted = await extractLeadFromMessage(text, { senderName });
   if (!extracted.is_relevant) return;
+
+  // Let the tenant's editable keywords break ties the AI left as unknown.
+  extracted.role = resolveRole(extracted, text, await getSettings(userId));
 
   await saveLead(userId, extracted, {
     source: 'telegram',

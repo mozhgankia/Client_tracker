@@ -124,12 +124,20 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
     linear-gradient(160deg, #103127 0%, #071612 100%);
   color: #EAF3EC; display: flex; flex-direction: column; justify-content: space-between; padding: 56px;
 }
-/* Decorative Burj Khalifa silhouette in the login hero — a subtle gold
-   backdrop that gives the panel a Dubai real-estate feel. */
-.burj-hero {
-  position: absolute; bottom: -12px; inset-inline-end: 44px;
-  height: 76%; width: auto; color: #F2C876; opacity: .15; pointer-events: none;
+/* Dubai backdrop (real Unsplash photo over a vector-skyline fallback, with an
+   emerald gradient overlay). Shared by the login hero and the dashboard header. */
+.dubai-backdrop { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.dubai-backdrop-skyline { position: absolute; inset-inline: 0; bottom: 0; width: 100%; height: 62%; }
+.dubai-backdrop-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.dubai-backdrop-overlay { position: absolute; inset: 0; }
+.dubai-backdrop.login .dubai-backdrop-overlay {
+  background: linear-gradient(160deg, rgba(16,49,39,.82) 0%, rgba(7,22,18,.68) 55%, rgba(6,18,14,.86) 100%);
 }
+.dubai-backdrop.today .dubai-backdrop-overlay {
+  background: linear-gradient(160deg, rgba(16,49,39,.88) 0%, rgba(8,24,18,.80) 100%);
+}
+/* keep hero content above the backdrop */
+.login-visual .brandmark, .login-visual .pitch { position: relative; z-index: 1; }
 @media (max-width: 860px) { .login-visual { display: none; } }
 .brandmark { display: flex; align-items: center; gap: 12px; }
 .brandmark .mark {
@@ -238,6 +246,22 @@ button:focus-visible, .navitem:focus-visible {
 .sidebar-deco svg { height: 120px; width: auto; color: var(--accent); opacity: .22; }
 
 .main { flex: 1; min-width: 0; }
+
+/* ---------- Today's Follow-ups hero (dashboard default) ---------- */
+.today-hero {
+  position: relative; overflow: hidden;
+  background:
+    radial-gradient(circle at 22% 10%, rgba(226,197,110,.18), transparent 55%),
+    linear-gradient(160deg, #103127 0%, #08181292 60%, #06120E 100%);
+  color: #EAF3EC; padding: 30px 32px 34px;
+}
+.today-hero-body { position: relative; z-index: 1; }
+.today-date { font-size: 12.5px; color: #C6D6CB; letter-spacing: .02em; }
+.today-hero h1 { font-size: 26px; font-weight: 800; margin-top: 6px; color: #FBFDF9; }
+.today-hero p { color: #AFC4B7; font-size: 13.5px; margin-top: 6px; }
+.today-stats { display: flex; gap: 30px; margin-top: 20px; }
+.today-stat b { display: block; font-size: 26px; font-weight: 800; color: #F2C876; line-height: 1.1; }
+.today-stat span { font-size: 12px; color: #AFC4B7; }
 .topbar {
   position: sticky; top: 0; z-index: 5;
   background: color-mix(in srgb, var(--bg) 88%, transparent);
@@ -320,6 +344,27 @@ button:focus-visible, .navitem:focus-visible {
   padding: 14px 16px; font-size: 13px; color: var(--ink-soft); display: flex; gap: 10px; align-items: flex-start;
   margin-bottom: 16px;
 }
+
+/* ---------- Classification board ---------- */
+.classify-board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 980px) { .classify-board { grid-template-columns: 1fr; } }
+.classify-col {
+  background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px;
+}
+.classify-col-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.classify-col-head .count { font-size: 13px; font-weight: 700; color: var(--ink-faint); }
+.classify-col .empty-note { margin-bottom: 0; }
+.suggestion-box {
+  background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 10px;
+  padding: 12px 14px; font-size: 13px;
+}
+.suggestion-box strong { color: var(--accent-ink); }
+:root[data-theme="dark"] .suggestion-box strong, :root:not([data-theme="light"]) .suggestion-box strong { color: var(--accent-ink); }
+textarea {
+  padding: 11px 13px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--ink); font-size: 14px; font-family: inherit; line-height: 1.8;
+}
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
 
 /* modal (used by add/edit forms) */
 .modal-backdrop {

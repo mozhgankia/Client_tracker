@@ -18,6 +18,8 @@ const { useSupabaseAuthState } = require('./supabaseAuthState');
 const { isLikelyRealEstateMessage } = require('../shared/keywordFilter');
 const { extractLeadFromMessage } = require('../ai/geminiExtract');
 const { saveLead } = require('../db/leads');
+const { getSettings } = require('../db/settings');
+const { resolveRole } = require('../classify/classifier');
 const supabase = require('../db/supabaseClient');
 
 // Baileys rotates the QR roughly every 20s until it's scanned; used to give
@@ -134,6 +136,9 @@ async function handleIncomingMessage(userId, msg) {
 
   const extracted = await extractLeadFromMessage(text, { senderName });
   if (!extracted.is_relevant) return;
+
+  // Let the tenant's editable keywords break ties the AI left as unknown.
+  extracted.role = resolveRole(extracted, text, await getSettings(userId));
 
   await saveLead(userId, extracted, {
     source: 'whatsapp',
