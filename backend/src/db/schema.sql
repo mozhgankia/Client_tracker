@@ -15,6 +15,9 @@ create table if not exists users (
   full_name text,
   created_at timestamptz not null default now()
 );
+-- User-uploaded profile picture, stored as a small downscaled data URL (the
+-- frontend shrinks it to ~160px before upload, so this stays a few KB).
+alter table users add column if not exists avatar_url text;
 
 -- Buyer/tenant-side contacts, scoped to a tenant (user_id).
 create table if not exists customers (

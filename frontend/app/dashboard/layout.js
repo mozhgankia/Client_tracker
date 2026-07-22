@@ -1,12 +1,19 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '../../lib/AuthContext';
 import { useLanguage } from '../../lib/LanguageContext';
-import BurjKhalifa from '../../components/BurjKhalifa';
+import { apiFetch } from '../../lib/api';
+import { fileToAvatarDataUrl } from '../../lib/image';
 import HandshakeMark from '../../components/HandshakeMark';
+
+// Downtown Dubai photo used as the user's profile picture (Unsplash License:
+// free for commercial use). Square crop for the round avatar; falls back to
+// initials if it can't load.
+const PROFILE_PHOTO_URL =
+  'https://images.unsplash.com/photo-1512453979798-5ea266f8880c?auto=format&fit=crop&w=256&h=256&q=80';
 
 const STRINGS = {
   fa: {
@@ -20,6 +27,7 @@ const STRINGS = {
     connections: 'اتصالات',
     settings: 'تنظیمات',
     role: 'مشاور املاک',
+    uploadPhoto: 'آپلود عکس پروفایل',
     logout: 'خروج',
   },
   en: {
@@ -33,6 +41,7 @@ const STRINGS = {
     connections: 'Connections',
     settings: 'Settings',
     role: 'Real estate agent',
+    uploadPhoto: 'Upload profile photo',
     logout: 'Log out',
   },
   ar: {
@@ -46,6 +55,7 @@ const STRINGS = {
     connections: 'الاتصالات',
     settings: 'الإعدادات',
     role: 'وسيط عقاري',
+    uploadPhoto: 'تحميل صورة الملف الشخصي',
     logout: 'تسجيل الخروج',
   },
 };
@@ -67,10 +77,42 @@ export default function DashboardLayout({ children }) {
   const t = STRINGS[lang] || STRINGS.fa;
   const router = useRouter();
   const pathname = usePathname();
+  const [avatarOk, setAvatarOk] = useState(true);
+  const [avatarUrl, setAvatarUrl] = useState(null); // user-uploaded profile picture
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     if (ready && !token) router.replace('/login');
   }, [ready, token, router]);
+
+  useEffect(() => {
+    if (!token) return;
+    apiFetch('/api/profile', { token })
+      .then((p) => {
+        if (p?.avatar_url) {
+          setAvatarUrl(p.avatar_url);
+          setAvatarOk(true);
+        }
+      })
+      .catch(() => {});
+  }, [token]);
+
+  const handleAvatarUpload = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file later
+    if (!file) return;
+    setUploading(true);
+    try {
+      const dataUrl = await fileToAvatarDataUrl(file, 160);
+      const p = await apiFetch('/api/profile', { method: 'PATCH', body: { avatar_url: dataUrl }, token });
+      setAvatarUrl(p?.avatar_url || dataUrl);
+      setAvatarOk(true);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setUploading(false);
+    }
+  };
 
   if (!ready || !token) return null; // avoid flashing dashboard content before the redirect
 
@@ -100,12 +142,17 @@ export default function DashboardLayout({ children }) {
           ))}
         </div>
 
-        <div className="sidebar-deco">
-          <BurjKhalifa />
-        </div>
-
         <div className="sidebar-foot">
-          <div className="avatar">مک</div>
+          <label className="avatar avatar-photo" title={t.uploadPhoto}>
+            {avatarOk ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={avatarUrl || PROFILE_PHOTO_URL} alt="" onError={() => setAvatarOk(false)} />
+            ) : (
+              'مک'
+            )}
+            <span className="avatar-cam">{uploading ? '…' : '📷'}</span>
+            <input type="file" accept="image/*" onChange={handleAvatarUpload} style={{ display: 'none' }} />
+          </label>
           <div className="whorole">
             <div className="who">{t.role}</div>
           </div>
