@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '../../lib/AuthContext';
 import { useLanguage } from '../../lib/LanguageContext';
 import DubaiBackdrop from '../../components/DubaiBackdrop';
+import HandshakeMark from '../../components/HandshakeMark';
 
 const STRINGS = {
   fa: {
@@ -187,7 +188,9 @@ export default function LoginPage() {
       <div className="login-visual">
         <DubaiBackdrop variant="login" />
         <div className="brandmark">
-          <div className="mark">E</div>
+          <div className="mark mark-handshake">
+            <HandshakeMark />
+          </div>
           <div className="name">{t.brand}</div>
         </div>
         <div className="pitch">

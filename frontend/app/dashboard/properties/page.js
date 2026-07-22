@@ -4,10 +4,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/api';
 import { useAuth } from '../../../lib/AuthContext';
 import { useLanguage } from '../../../lib/LanguageContext';
+import A2AProperties from '../../../components/A2AProperties';
 
 const STRINGS = {
   fa: {
     title: 'ملک‌ها',
+    tabMine: 'ملک‌های من',
+    tabA2A: 'A2A (همکار)',
     count: (n) => `${n} ملک ثبت‌شده`,
     newProperty: '+ ملک جدید',
     filterAll: 'همه',
@@ -47,6 +50,8 @@ const STRINGS = {
   },
   en: {
     title: 'Properties',
+    tabMine: 'My properties',
+    tabA2A: 'A2A (colleagues)',
     count: (n) => `${n} listed properties`,
     newProperty: '+ New property',
     filterAll: 'All',
@@ -86,6 +91,8 @@ const STRINGS = {
   },
   ar: {
     title: 'العقارات',
+    tabMine: 'عقاراتي',
+    tabA2A: 'A2A (الزملاء)',
     count: (n) => `${n} عقارًا مسجلاً`,
     newProperty: '+ عقار جديد',
     filterAll: 'الكل',
@@ -154,6 +161,7 @@ export default function PropertiesPage() {
   const { lang } = useLanguage();
   const t = STRINGS[lang] || STRINGS.fa;
 
+  const [mode, setMode] = useState('own'); // 'own' | 'a2a'
   const [properties, setProperties] = useState([]);
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
@@ -246,28 +254,43 @@ export default function PropertiesPage() {
           <div className="desc tabular">{t.count(properties.length)}</div>
         </div>
         <div className="actions">
-          <button className="btn accent" onClick={openNew}>
-            {t.newProperty}
-          </button>
+          {mode === 'own' && (
+            <button className="btn accent" onClick={openNew}>
+              {t.newProperty}
+            </button>
+          )}
         </div>
       </div>
 
       <div className="content">
-        {error && <div className="form-error">{error}</div>}
-
-        <div className="filters">
-          {Object.keys(FILTERS).map((key) => (
-            <div key={key} className={`chip${filter === key ? ' active' : ''}`} onClick={() => setFilter(key)}>
-              {key === 'all' && t.filterAll}
-              {key === 'primary' && t.filterPrimary}
-              {key === 'secPresale' && t.filterSecPresale}
-              {key === 'secReady' && t.filterSecReady}
-              {key === 'secRent' && t.filterSecRent}
-            </div>
-          ))}
+        <div className="seg-tabs">
+          <button className={`seg${mode === 'own' ? ' active' : ''}`} onClick={() => setMode('own')}>
+            {t.tabMine}
+          </button>
+          <button className={`seg${mode === 'a2a' ? ' active' : ''}`} onClick={() => setMode('a2a')}>
+            🤝 {t.tabA2A}
+          </button>
         </div>
 
-        {!loading && properties.length === 0 && <div className="empty-note">{t.empty}</div>}
+        {mode === 'a2a' ? (
+          <A2AProperties />
+        ) : (
+          <>
+            {error && <div className="form-error">{error}</div>}
+
+            <div className="filters">
+              {Object.keys(FILTERS).map((key) => (
+                <div key={key} className={`chip${filter === key ? ' active' : ''}`} onClick={() => setFilter(key)}>
+                  {key === 'all' && t.filterAll}
+                  {key === 'primary' && t.filterPrimary}
+                  {key === 'secPresale' && t.filterSecPresale}
+                  {key === 'secReady' && t.filterSecReady}
+                  {key === 'secRent' && t.filterSecRent}
+                </div>
+              ))}
+            </div>
+
+            {!loading && properties.length === 0 && <div className="empty-note">{t.empty}</div>}
 
         <div className="grid-cards">
           {properties.map((p) => (
@@ -297,6 +320,8 @@ export default function PropertiesPage() {
             </div>
           ))}
         </div>
+          </>
+        )}
       </div>
 
       {modalOpen && (

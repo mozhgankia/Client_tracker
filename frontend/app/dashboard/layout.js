@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useAuth } from '../../lib/AuthContext';
 import { useLanguage } from '../../lib/LanguageContext';
 import BurjKhalifa from '../../components/BurjKhalifa';
+import HandshakeMark from '../../components/HandshakeMark';
 
 const STRINGS = {
   fa: {
@@ -77,7 +78,9 @@ export default function DashboardLayout({ children }) {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brandmark">
-          <div className="mark">E</div>
+          <div className="mark mark-handshake">
+            <HandshakeMark />
+          </div>
           <div className="name">{t.brand}</div>
         </div>
 

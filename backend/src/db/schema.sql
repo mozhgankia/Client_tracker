@@ -110,6 +110,13 @@ create index if not exists leads_user_idx on leads(user_id);
 create index if not exists leads_phone_idx on leads(phone);
 create index if not exists leads_status_idx on leads(status);
 
+-- Where the lead came from: 'direct' = a personal 1:1 chat (buyer/owner keyword
+-- classification applies), 'group' = a colleague group / A2A market (personal
+-- keyword classification is NOT applied; these feed the A2A board instead).
+-- `add column if not exists` so existing databases get it too.
+alter table leads add column if not exists context text not null default 'direct';
+create index if not exists leads_context_idx on leads(context);
+
 -- Per-tenant classification settings. The intelligent classifier uses these
 -- editable keyword lists to decide, without an AI call, whether a contact is
 -- an owner (listing/selling) or a client (buying/renting). Empty lists mean

@@ -146,6 +146,11 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
   display: flex; align-items: center; justify-content: center;
   font-weight: 700; color: #171208; font-size: 17px;
 }
+/* handshake brandmark: emerald square with a gold handshake, matching the app icon */
+.brandmark .mark.mark-handshake {
+  background: linear-gradient(135deg, #12805B, #083A2A);
+  color: #F1D07B;
+}
 .brandmark .name { font-size: 17px; font-weight: 700; letter-spacing: .2px; }
 .login-visual .pitch { max-width: 440px; position: relative; z-index: 1; }
 .login-visual .pitch .eyebrow {
@@ -357,6 +362,32 @@ button:focus-visible, .navitem:focus-visible {
   padding: 14px 16px; font-size: 13px; color: var(--ink-soft); display: flex; gap: 10px; align-items: flex-start;
   margin-bottom: 16px;
 }
+
+/* ---------- Segmented tabs (My / A2A) ---------- */
+.seg-tabs {
+  display: inline-flex; gap: 4px; background: var(--surface-alt); border: 1px solid var(--border);
+  border-radius: 10px; padding: 4px; margin-bottom: 18px;
+}
+.seg {
+  border: none; background: transparent; padding: 8px 18px; border-radius: 7px;
+  font-size: 13.5px; font-weight: 600; color: var(--ink-soft); font-family: inherit;
+}
+.seg.active { background: var(--surface); color: var(--accent-ink); box-shadow: var(--shadow); }
+:root[data-theme="dark"] .seg.active, :root:not([data-theme="light"]) .seg.active { color: var(--accent-ink); }
+
+/* ---------- A2A advanced filters ---------- */
+.a2a-filters {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px;
+  background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px; align-items: end;
+}
+.a2a-filter { display: flex; flex-direction: column; gap: 4px; }
+.a2a-filter label { font-size: 11.5px; color: var(--ink-soft); }
+.a2a-filter input, .a2a-filter select {
+  padding: 8px 10px; border-radius: 7px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--ink); font-size: 13.5px; font-family: inherit; width: 100%;
+}
+.a2a-filter-actions { display: flex; gap: 8px; align-items: end; }
 
 /* ---------- Classification board ---------- */
 .classify-board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start; }

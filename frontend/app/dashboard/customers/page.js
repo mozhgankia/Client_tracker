@@ -4,10 +4,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/api';
 import { useAuth } from '../../../lib/AuthContext';
 import { useLanguage } from '../../../lib/LanguageContext';
+import ColleagueClients from '../../../components/ColleagueClients';
+import OfferSearchModal from '../../../components/OfferSearchModal';
 
 const STRINGS = {
   fa: {
     title: 'مشتری‌ها',
+    tabMine: 'مشتری‌های من',
+    tabColleague: 'مشتری‌های همکار',
+    findOffer: 'یافتن آفر',
     count: (n) => `${n} مشتری ثبت‌شده`,
     newCustomer: '+ مشتری جدید',
     filterAll: 'همه',
@@ -42,6 +47,9 @@ const STRINGS = {
   },
   en: {
     title: 'Clients',
+    tabMine: 'My clients',
+    tabColleague: 'Colleague clients',
+    findOffer: 'Find offer',
     count: (n) => `${n} registered clients`,
     newCustomer: '+ New client',
     filterAll: 'All',
@@ -76,6 +84,9 @@ const STRINGS = {
   },
   ar: {
     title: 'العملاء',
+    tabMine: 'عملائي',
+    tabColleague: 'عملاء الزملاء',
+    findOffer: 'ابحث عن عرض',
     count: (n) => `${n} عميلاً مسجلاً`,
     newCustomer: '+ عميل جديد',
     filterAll: 'الكل',
@@ -127,6 +138,8 @@ export default function CustomersPage() {
   const { lang } = useLanguage();
   const t = STRINGS[lang] || STRINGS.fa;
 
+  const [mode, setMode] = useState('own'); // 'own' | 'colleague'
+  const [offerCustomer, setOfferCustomer] = useState(null);
   const [customers, setCustomers] = useState([]);
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
@@ -213,35 +226,50 @@ export default function CustomersPage() {
           <div className="desc tabular">{t.count(customers.length)}</div>
         </div>
         <div className="actions">
-          <button className="btn accent" onClick={openNew}>
-            {t.newCustomer}
-          </button>
+          {mode === 'own' && (
+            <button className="btn accent" onClick={openNew}>
+              {t.newCustomer}
+            </button>
+          )}
         </div>
       </div>
 
       <div className="content">
-        {error && <div className="form-error">{error}</div>}
-
-        <div className="filters">
-          {['all', 'residential', 'commercial', 'high'].map((key) => (
-            <div key={key} className={`chip${filter === key ? ' active' : ''}`} onClick={() => setFilter(key)}>
-              {key === 'all' && t.filterAll}
-              {key === 'residential' && t.filterResidential}
-              {key === 'commercial' && t.filterCommercial}
-              {key === 'high' && t.filterHighPotential}
-            </div>
-          ))}
+        <div className="seg-tabs">
+          <button className={`seg${mode === 'own' ? ' active' : ''}`} onClick={() => setMode('own')}>
+            {t.tabMine}
+          </button>
+          <button className={`seg${mode === 'colleague' ? ' active' : ''}`} onClick={() => setMode('colleague')}>
+            🤝 {t.tabColleague}
+          </button>
         </div>
 
-        {!loading && customers.length === 0 && <div className="empty-note">{t.empty}</div>}
+        {mode === 'colleague' ? (
+          <ColleagueClients />
+        ) : (
+          <>
+            {error && <div className="form-error">{error}</div>}
 
-        <div className="card-list">
-          {customers.map((c) => (
-            <div className="cust-card" key={c.id}>
-              <div className="who">
-                <div className="name">{c.name}</div>
-                <div className="meta">
-                  <span>
+            <div className="filters">
+              {['all', 'residential', 'commercial', 'high'].map((key) => (
+                <div key={key} className={`chip${filter === key ? ' active' : ''}`} onClick={() => setFilter(key)}>
+                  {key === 'all' && t.filterAll}
+                  {key === 'residential' && t.filterResidential}
+                  {key === 'commercial' && t.filterCommercial}
+                  {key === 'high' && t.filterHighPotential}
+                </div>
+              ))}
+            </div>
+
+            {!loading && customers.length === 0 && <div className="empty-note">{t.empty}</div>}
+
+            <div className="card-list">
+              {customers.map((c) => (
+                <div className="cust-card" key={c.id}>
+                  <div className="who">
+                    <div className="name">{c.name}</div>
+                    <div className="meta">
+                      <span>
                     {t[c.type] || c.type} · {t[c.subtype] || c.subtype}
                   </span>
                   {c.potential && <span className={`pill ${c.potential}`}>{t[c.potential] || c.potential}</span>}
@@ -253,6 +281,9 @@ export default function CustomersPage() {
                 </div>
               </div>
               <div className="card-actions">
+                <button className="btn accent" onClick={() => setOfferCustomer(c)}>
+                  🔎 {t.findOffer}
+                </button>
                 <button className="icon-btn" onClick={() => openEdit(c)} title={t.edit}>
                   ✎
                 </button>
@@ -263,7 +294,11 @@ export default function CustomersPage() {
             </div>
           ))}
         </div>
+          </>
+        )}
       </div>
+
+      {offerCustomer && <OfferSearchModal customer={offerCustomer} onClose={() => setOfferCustomer(null)} />}
 
       {modalOpen && (
         <div className="modal-backdrop" onClick={() => setModalOpen(false)}>

@@ -122,7 +122,11 @@ async function handleConnectionUpdate(userId, entry, sock, update) {
 async function handleIncomingMessage(userId, msg) {
   if (!msg.message) return;
   const jid = msg.key.remoteJid;
-  if (!jid || !jid.endsWith('@s.whatsapp.net')) return; // فقط چت‌های شخصی، نه گروه‌ها
+  if (!jid) return;
+  const isGroup = jid.endsWith('@g.us'); // colleague group → A2A market
+  const isDirect = jid.endsWith('@s.whatsapp.net'); // personal 1:1 chat
+  if (!isGroup && !isDirect) return; // ignore broadcasts/status/etc.
+  const context = isGroup ? 'group' : 'direct';
 
   const text =
     msg.message.conversation ||
@@ -131,14 +135,20 @@ async function handleIncomingMessage(userId, msg) {
     '';
   if (!isLikelyRealEstateMessage(text)) return; // فیلتر ارزان قبل از فراخوانی AI
 
-  const phone = jid.split('@')[0];
+  // In a group the sender is the participant, not the chat jid.
+  const senderJid = isGroup ? msg.key.participant : jid;
+  const phone = senderJid ? senderJid.split('@')[0].split(':')[0] : null;
   const senderName = msg.pushName || undefined;
 
   const extracted = await extractLeadFromMessage(text, { senderName });
   if (!extracted.is_relevant) return;
 
-  // Let the tenant's editable keywords break ties the AI left as unknown.
-  extracted.role = resolveRole(extracted, text, await getSettings(userId));
+  // Keyword classification is for PERSONAL chats only. In groups (A2A market)
+  // we keep the AI's owner/client call as-is and never apply the tenant's
+  // personal buyer/owner keywords.
+  if (context === 'direct') {
+    extracted.role = resolveRole(extracted, text, await getSettings(userId));
+  }
 
   await saveLead(userId, extracted, {
     source: 'whatsapp',
@@ -147,10 +157,11 @@ async function handleIncomingMessage(userId, msg) {
     telegramId: null,
     phone,
     rawMessage: text,
+    context,
   });
 
   console.log(
-    `[whatsapp:${userId}] لید تازه ذخیره شد (${extracted.role} / ${extracted.request_type}) از ${senderName || phone}`
+    `[whatsapp:${userId}] لید ${context} ذخیره شد (${extracted.role} / ${extracted.request_type}) از ${senderName || phone}`
   );
 }
 

@@ -94,11 +94,16 @@ async function handleNewMessage(userId, event) {
   const senderName = sender ? [sender.firstName, sender.lastName].filter(Boolean).join(' ') : undefined;
   const telegramId = sender && sender.id ? String(sender.id) : undefined;
 
+  // A private 1:1 chat is a personal lead; groups/channels are the A2A market.
+  const context = message.isPrivate ? 'direct' : 'group';
+
   const extracted = await extractLeadFromMessage(text, { senderName });
   if (!extracted.is_relevant) return;
 
-  // Let the tenant's editable keywords break ties the AI left as unknown.
-  extracted.role = resolveRole(extracted, text, await getSettings(userId));
+  // Keyword classification applies to personal chats only (see WhatsApp path).
+  if (context === 'direct') {
+    extracted.role = resolveRole(extracted, text, await getSettings(userId));
+  }
 
   await saveLead(userId, extracted, {
     source: 'telegram',
@@ -107,6 +112,7 @@ async function handleNewMessage(userId, event) {
     telegramId,
     phone: sender && sender.phone ? sender.phone : null,
     rawMessage: text,
+    context,
   });
 
   console.log(`[telegram] لید تازه ذخیره شد (${extracted.role} / ${extracted.request_type}) از ${senderName || telegramId}`);

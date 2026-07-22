@@ -26,6 +26,7 @@ async function saveLead(userId, extracted, meta) {
     listed_price: extracted.listed_price ?? null,
     parking: extracted.parking ?? null,
     raw_message: meta.rawMessage,
+    context: meta.context || 'direct',
   };
 
   const { data, error } = await supabase.from('leads').insert(row).select().single();
@@ -34,7 +35,7 @@ async function saveLead(userId, extracted, meta) {
 }
 
 async function listLeads(userId, filters = {}) {
-  let query = supabase.from('leads').select('*').eq('user_id', userId);
+  let query = supabase.from('leads').select('*').eq('user_id', userId).eq('context', 'direct');
   query = query.eq('status', filters.status || 'new'); // "پیگیری امروز" wants new leads by default
   if (filters.source) query = query.eq('source', filters.source);
 
@@ -49,15 +50,32 @@ async function getLead(userId, id) {
   return data;
 }
 
-/** All non-dismissed leads for a tenant, grouped by role for the
- *  classification board (owners / clients / unknown). */
+/** All non-dismissed personal (direct-chat) leads for a tenant, grouped by role
+ *  for the classification board (owners / clients / unknown). Group/A2A leads
+ *  are excluded — they belong to the colleague-market board, not here. */
 async function listActiveLeads(userId) {
   const { data, error } = await supabase
     .from('leads')
     .select('*')
     .eq('user_id', userId)
+    .eq('context', 'direct')
     .neq('status', 'dismissed')
     .order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+/** Group/A2A leads of a given role: role='owner' → colleague property listings,
+ *  role='client' → colleague clients looking for a property. */
+async function listGroupLeads(userId, role) {
+  let query = supabase
+    .from('leads')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('context', 'group')
+    .neq('status', 'dismissed');
+  if (role) query = query.eq('role', role);
+  const { data, error } = await query.order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return data || [];
 }
@@ -157,6 +175,7 @@ module.exports = {
   saveLead,
   listLeads,
   listActiveLeads,
+  listGroupLeads,
   setLeadRole,
   getLead,
   updateLeadStatus,
