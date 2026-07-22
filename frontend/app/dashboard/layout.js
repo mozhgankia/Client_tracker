@@ -80,10 +80,16 @@ export default function DashboardLayout({ children }) {
   const [avatarOk, setAvatarOk] = useState(true);
   const [avatarUrl, setAvatarUrl] = useState(null); // user-uploaded profile picture
   const [uploading, setUploading] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false); // mobile off-canvas sidebar
 
   useEffect(() => {
     if (ready && !token) router.replace('/login');
   }, [ready, token, router]);
+
+  // Close the mobile drawer whenever the route changes.
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     if (!token) return;
@@ -118,7 +124,7 @@ export default function DashboardLayout({ children }) {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <aside className={`sidebar${menuOpen ? ' open' : ''}`}>
         <div className="brandmark">
           <div className="mark mark-handshake">
             <HandshakeMark />
@@ -131,6 +137,7 @@ export default function DashboardLayout({ children }) {
             <Link
               key={item.href}
               href={item.href}
+              onClick={() => setMenuOpen(false)}
               className={`navitem${
                 (item.href === '/dashboard' ? pathname === '/dashboard' : pathname.startsWith(item.href))
                   ? ' active'
@@ -177,7 +184,23 @@ export default function DashboardLayout({ children }) {
           {t.logout}
         </button>
       </aside>
-      <div className="main">{children}</div>
+
+      {menuOpen && <div className="sidebar-backdrop" onClick={() => setMenuOpen(false)} />}
+
+      <div className="main">
+        <header className="mobile-topbar">
+          <button className="hamburger" onClick={() => setMenuOpen(true)} aria-label="menu">
+            ☰
+          </button>
+          <div className="mobile-brand">
+            <span className="mark mark-handshake mark-sm">
+              <HandshakeMark size={15} />
+            </span>
+            {t.brand}
+          </div>
+        </header>
+        {children}
+      </div>
     </div>
   );
 }
