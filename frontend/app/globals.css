@@ -402,6 +402,12 @@ button:focus-visible, .navitem:focus-visible {
 }
 .a2a-filter-actions { display: flex; gap: 8px; align-items: end; }
 
+/* inline category override on a lead card (manual correction of the AI guess) */
+.role-select {
+  border: 1px solid var(--border); background: var(--surface); color: var(--ink);
+  border-radius: 7px; padding: 3px 8px; font-size: 12.5px; font-family: inherit; cursor: pointer;
+}
+
 /* ---------- Classification board ---------- */
 .classify-board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start; }
 @media (max-width: 980px) { .classify-board { grid-template-columns: 1fr; } }

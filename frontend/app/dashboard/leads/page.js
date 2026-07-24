@@ -7,16 +7,19 @@ import { useLanguage } from '../../../lib/LanguageContext';
 
 const STRINGS = {
   fa: {
-    title: '🤖 لیدهای تازه',
-    count: (n) => `${n} مورد`,
-    desc: 'مخاطب‌ها و ملک‌هایی که ربات واتساپ/تلگرام از تحلیل چت‌ها پیدا کرده.',
-    empty: 'فعلاً لید تازه‌ای نیست.',
+    title: '🤖 مدیریت چت‌ها',
+    desc: 'مخاطب‌هایی که ربات از تحلیل چت‌های واتساپ و تلگرام پیدا کرده — هر کدام در صندوقِ خودش.',
+    tabWhatsapp: '💬 واتساپ',
+    tabTelegram: '✈️ تلگرام',
+    empty: 'در این صندوق فعلاً چیزی نیست.',
     addAsCustomer: 'افزودن به مشتری‌ها',
     addAsProperty: 'افزودن به ملک‌ها',
     dismiss: 'نادیده بگیر',
-    guessOwner: 'حدس: مالک',
-    guessClient: 'حدس: مشتری',
-    guessUnknown: 'حدس: نامشخص',
+    roleLabel: 'دسته:',
+    roleOwner: 'مالک',
+    roleClient: 'مشتری',
+    roleUnknown: 'نامشخص',
+    auto: 'خودکار',
     propertyModalTitle: 'افزودن به ملک‌ها',
     category: 'دسته',
     subCategory: 'زیردسته (سکندری)',
@@ -29,16 +32,19 @@ const STRINGS = {
     cancel: 'انصراف',
   },
   en: {
-    title: '🤖 New leads',
-    count: (n) => `${n} items`,
-    desc: 'Contacts and properties the WhatsApp/Telegram bot found by analyzing chats.',
-    empty: 'No new leads right now.',
+    title: '🤖 Chat management',
+    desc: 'Contacts the bot found from WhatsApp and Telegram chats — each in its own inbox.',
+    tabWhatsapp: '💬 WhatsApp',
+    tabTelegram: '✈️ Telegram',
+    empty: 'Nothing in this inbox yet.',
     addAsCustomer: 'Add to clients',
     addAsProperty: 'Add to properties',
     dismiss: 'Dismiss',
-    guessOwner: 'Guess: Owner',
-    guessClient: 'Guess: Client',
-    guessUnknown: 'Guess: Unknown',
+    roleLabel: 'Category:',
+    roleOwner: 'Owner',
+    roleClient: 'Client',
+    roleUnknown: 'Unknown',
+    auto: 'auto',
     propertyModalTitle: 'Add to properties',
     category: 'Category',
     subCategory: 'Sub-category (secondary)',
@@ -51,16 +57,19 @@ const STRINGS = {
     cancel: 'Cancel',
   },
   ar: {
-    title: '🤖 عملاء محتملون جدد',
-    count: (n) => `${n} عناصر`,
-    desc: 'جهات اتصال وعقارات وجدها بوت واتساب/تيليجرام من تحليل المحادثات.',
-    empty: 'لا توجد عملاء محتملون جدد حاليًا.',
+    title: '🤖 إدارة المحادثات',
+    desc: 'جهات اتصال وجدها البوت من محادثات واتساب وتيليجرام — كل منها في صندوقه.',
+    tabWhatsapp: '💬 واتساب',
+    tabTelegram: '✈️ تيليجرام',
+    empty: 'لا شيء في هذا الصندوق بعد.',
     addAsCustomer: 'إضافة إلى العملاء',
     addAsProperty: 'إضافة إلى العقارات',
     dismiss: 'تجاهل',
-    guessOwner: 'تخمين: مالك',
-    guessClient: 'تخمين: عميل',
-    guessUnknown: 'تخمين: غير معروف',
+    roleLabel: 'الفئة:',
+    roleOwner: 'مالك',
+    roleClient: 'عميل',
+    roleUnknown: 'غير معروف',
+    auto: 'تلقائي',
     propertyModalTitle: 'إضافة إلى العقارات',
     category: 'الفئة',
     subCategory: 'الفئة الفرعية (ثانوي)',
@@ -79,6 +88,7 @@ export default function LeadsPage() {
   const { lang } = useLanguage();
   const t = STRINGS[lang] || STRINGS.fa;
 
+  const [source, setSource] = useState('whatsapp'); // 'whatsapp' | 'telegram'
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -88,13 +98,13 @@ export default function LeadsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setLeads(await apiFetch('/api/leads', { token }));
+      setLeads(await apiFetch(`/api/leads?source=${source}`, { token }));
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, source]);
 
   useEffect(() => {
     if (token) load();
@@ -112,6 +122,16 @@ export default function LeadsPage() {
   const handleAddAsCustomer = async (id) => {
     try {
       await apiFetch(`/api/leads/${id}/convert-to-customer`, { method: 'POST', body: {}, token });
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  // Manual override of the AI's category, so a wrong guess can be corrected.
+  const handleSetRole = async (id, role) => {
+    try {
+      await apiFetch(`/api/classification/${id}/role`, { method: 'POST', body: { role }, token });
       await load();
     } catch (err) {
       setError(err.message);
@@ -138,8 +158,6 @@ export default function LeadsPage() {
     }
   };
 
-  const roleLabel = (role) => (role === 'owner' ? t.guessOwner : role === 'client' ? t.guessClient : t.guessUnknown);
-
   return (
     <>
       <div className="topbar">
@@ -150,6 +168,16 @@ export default function LeadsPage() {
       </div>
 
       <div className="content">
+        {/* WhatsApp / Telegram separate inboxes */}
+        <div className="seg-tabs">
+          <button className={`seg${source === 'whatsapp' ? ' active' : ''}`} onClick={() => setSource('whatsapp')}>
+            {t.tabWhatsapp}
+          </button>
+          <button className={`seg${source === 'telegram' ? ' active' : ''}`} onClick={() => setSource('telegram')}>
+            {t.tabTelegram}
+          </button>
+        </div>
+
         {error && <div className="form-error">{error}</div>}
         {!loading && leads.length === 0 && <div className="empty-note">{t.empty}</div>}
 
@@ -159,10 +187,23 @@ export default function LeadsPage() {
               <div className="who">
                 <div className="name">{lead.sender_name || lead.phone || lead.telegram_id}</div>
                 <div className="meta">
-                  <span className="pill muted">{roleLabel(lead.role)}</span>
                   {lead.region && <span>{lead.region}</span>}
                   {lead.listed_price != null && <span className="tabular">{lead.listed_price.toLocaleString()}</span>}
                   {lead.raw_message && <span>«{lead.raw_message.slice(0, 80)}»</span>}
+                </div>
+                {/* smart + manual classification */}
+                <div className="meta" style={{ marginTop: 6, alignItems: 'center' }}>
+                  <span className="pill muted">{t.roleLabel}</span>
+                  <select
+                    className="role-select"
+                    value={lead.role || 'unknown'}
+                    onChange={(e) => handleSetRole(lead.id, e.target.value)}
+                    title={t.auto}
+                  >
+                    <option value="owner">{t.roleOwner}</option>
+                    <option value="client">{t.roleClient}</option>
+                    <option value="unknown">{t.roleUnknown}</option>
+                  </select>
                 </div>
               </div>
               <div className="card-actions">
