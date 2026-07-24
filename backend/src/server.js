@@ -91,7 +91,8 @@ app.post(
 // so one tenant can never start/stop/inspect another tenant's connection.
 app.post('/api/whatsapp/connect', requireAuth, async (req, res) => {
   try {
-    await startWhatsAppConnection(req.userId);
+    const { phone } = req.body || {};
+    await startWhatsAppConnection(req.userId, phone);
     res.json(getConnectionInfo(req.userId));
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -44,6 +44,27 @@
   color: var(--ink-soft);
 }
 
+/* pairing-code flow */
+.wa-brandrow { display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 4px; }
+.wa-logo { font-size: 20px; }
+.wa-label { align-self: stretch; text-align: start; font-size: 13px; color: var(--ink-soft); }
+.wa-input {
+  align-self: stretch; padding: 11px 13px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--ink); font-size: 16px; font-family: inherit;
+  letter-spacing: 1px; text-align: center;
+}
+.wa-steps {
+  align-self: stretch; text-align: start; margin: 4px 0 8px; padding-inline-start: 18px;
+  font-size: 12.5px; color: var(--ink-soft); line-height: 1.9;
+}
+.wa-pairing-code {
+  font-size: 30px; font-weight: 800; letter-spacing: 6px;
+  color: var(--accent-ink); background: var(--accent-soft);
+  border: 1px dashed var(--accent); border-radius: 12px;
+  padding: 14px 18px; align-self: stretch; text-align: center; direction: ltr;
+}
+:root[data-theme="dark"] .wa-pairing-code, :root:not([data-theme="light"]) .wa-pairing-code { color: var(--accent-ink); }
+
 .wa-error-title {
   font-weight: 700;
   color: var(--critical);

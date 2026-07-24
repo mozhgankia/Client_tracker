@@ -26,9 +26,11 @@ const supabase = require('../db/supabaseClient');
 // the frontend a countdown so it knows when to expect the next one.
 const QR_VALIDITY_MS = 20_000;
 
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 // One entry per connected tenant:
-// { sock, status, qrDataUrl, qrExpiresAt, phone, profilePictureUrl, error }
-// status: 'connecting' | 'qr_pending' | 'connected' | 'disconnected' | 'error'
+// { sock, status, qrDataUrl, qrExpiresAt, pairingCode, usePairing, phone, profilePictureUrl, error }
+// status: 'connecting' | 'pairing_pending' | 'qr_pending' | 'connected' | 'disconnected' | 'error'
 const connections = new Map();
 
 function getConnectionInfo(userId) {
@@ -36,6 +38,7 @@ function getConnectionInfo(userId) {
   if (!entry) return { status: 'disconnected' };
   return {
     status: entry.status,
+    pairingCode: entry.pairingCode || null,
     qr: entry.qrDataUrl || null,
     qrExpiresAt: entry.qrExpiresAt || null,
     phone: entry.phone || null,
@@ -44,24 +47,44 @@ function getConnectionInfo(userId) {
   };
 }
 
+// WhatsApp needs the socket's websocket up before it will issue a pairing
+// code, so we wait a moment and retry once if the first attempt is too early.
+async function requestPairingWithRetry(sock, digits) {
+  await delay(2500);
+  try {
+    return await sock.requestPairingCode(digits);
+  } catch (err) {
+    await delay(2500);
+    return await sock.requestPairingCode(digits);
+  }
+}
+
 /**
- * Starts (or reuses) a tenant's WhatsApp connection.
+ * Starts (or reuses) a tenant's WhatsApp connection. When `phone` is given and
+ * the session isn't registered yet, uses the mobile-friendly pairing-code flow
+ * (the user types an 8-char code into WhatsApp) instead of a QR scan.
  * @param {string} userId
+ * @param {string} [phone] digits with country code (e.g. "9715xxxxxxx")
  */
-async function startWhatsAppConnection(userId) {
+async function startWhatsAppConnection(userId, phone) {
   const existing = connections.get(userId);
-  if (existing && (existing.status === 'connected' || existing.status === 'qr_pending')) {
+  if (existing && (existing.status === 'connected' || existing.status === 'pairing_pending')) {
     return existing;
   }
 
-  const entry = { sock: null, status: 'connecting', qrDataUrl: null };
+  const entry = { sock: null, status: 'connecting', qrDataUrl: null, pairingCode: null, usePairing: Boolean(phone) };
   connections.set(userId, entry);
 
   try {
     const { state, saveCreds } = await useSupabaseAuthState(userId);
     const { version } = await fetchLatestBaileysVersion();
 
-    const sock = makeWASocket({ auth: state, version });
+    const sock = makeWASocket({
+      auth: state,
+      version,
+      printQRInTerminal: false,
+      browser: ['Estatemate', 'Chrome', '1.0'],
+    });
     entry.sock = sock;
 
     sock.ev.on('creds.update', saveCreds);
@@ -74,6 +97,22 @@ async function startWhatsAppConnection(userId) {
         );
       }
     });
+
+    // Pairing-code flow: ask WhatsApp for the code the user enters in their app
+    // (Linked devices → Link with phone number). Only when a phone is supplied
+    // and this session hasn't been linked before.
+    if (phone && !sock.authState.creds.registered) {
+      const digits = String(phone).replace(/[^0-9]/g, '');
+      entry.status = 'pairing_pending';
+      try {
+        entry.pairingCode = await requestPairingWithRetry(sock, digits);
+        console.log(`[whatsapp:${userId}] کد اتصال صادر شد: ${entry.pairingCode}`);
+      } catch (err) {
+        entry.status = 'error';
+        entry.error = `دریافت کد اتصال ناموفق بود: ${err.message}`;
+        console.error(`[whatsapp:${userId}] درخواست pairing code شکست خورد:`, err.message);
+      }
+    }
   } catch (err) {
     entry.status = 'error';
     entry.error = err.message;
@@ -86,7 +125,8 @@ async function startWhatsAppConnection(userId) {
 async function handleConnectionUpdate(userId, entry, sock, update) {
   const { connection, lastDisconnect, qr } = update;
 
-  if (qr) {
+  // In pairing-code mode we ignore the QR entirely (the user links by code).
+  if (qr && !entry.usePairing) {
     entry.status = 'qr_pending';
     entry.qrDataUrl = await QRCode.toDataURL(qr);
     entry.qrExpiresAt = new Date(Date.now() + QR_VALIDITY_MS).toISOString();
@@ -98,10 +138,13 @@ async function handleConnectionUpdate(userId, entry, sock, update) {
     entry.status = 'disconnected';
     const statusCode =
       lastDisconnect?.error instanceof Boom ? lastDisconnect.error.output?.statusCode : undefined;
-    const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+    const registered = sock.authState?.creds?.registered;
+    // Only auto-reconnect an already-linked session; a half-finished pairing
+    // should wait for the user to start over (so we don't loop on a stale code).
+    const shouldReconnect = statusCode !== DisconnectReason.loggedOut && registered;
     console.log(
       `[whatsapp:${userId}] اتصال قطع شد.`,
-      shouldReconnect ? 'در حال تلاش مجدد...' : 'خروج کامل — باید دوباره از داشبورد QR بزنید.'
+      shouldReconnect ? 'در حال تلاش مجدد...' : 'خروج کامل — باید دوباره از داشبورد وصل کنید.'
     );
     await supabase.from('whatsapp_sessions').update({ connected: false }).eq('user_id', userId);
     if (shouldReconnect) setTimeout(() => startWhatsAppConnection(userId), 3000);
@@ -109,6 +152,7 @@ async function handleConnectionUpdate(userId, entry, sock, update) {
     entry.status = 'connected';
     entry.qrDataUrl = null;
     entry.qrExpiresAt = null;
+    entry.pairingCode = null;
     entry.error = null;
     entry.phone = sock.user?.id ? sock.user.id.split(':')[0].split('@')[0] : null;
     entry.profilePictureUrl = sock.user?.id
