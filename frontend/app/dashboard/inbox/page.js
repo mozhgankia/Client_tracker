@@ -24,6 +24,9 @@ const STRINGS = {
     client: 'مشتری',
     unknown: 'نامشخص',
     count: (n) => `${n} مخاطب`,
+    sync: '🔄 همگام‌سازی تلگرام',
+    syncing: 'در حال همگام‌سازی…',
+    syncDone: (n) => `همگام‌سازی شد — ${n} مورد تازه اضافه شد`,
   },
   en: {
     title: '📨 Inbox',
@@ -39,6 +42,9 @@ const STRINGS = {
     client: 'Client',
     unknown: 'Unknown',
     count: (n) => `${n} contacts`,
+    sync: '🔄 Sync Telegram',
+    syncing: 'Syncing…',
+    syncDone: (n) => `Synced — ${n} new added`,
   },
   ar: {
     title: '📨 صندوق الرسائل',
@@ -54,6 +60,9 @@ const STRINGS = {
     client: 'عميل',
     unknown: 'غير معروف',
     count: (n) => `${n} جهة اتصال`,
+    sync: '🔄 مزامنة تيليجرام',
+    syncing: 'جارٍ المزامنة…',
+    syncDone: (n) => `تمت المزامنة — أُضيف ${n} جديد`,
   },
 };
 
@@ -67,6 +76,8 @@ export default function InboxPage() {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -92,6 +103,22 @@ export default function InboxPage() {
     }
   };
 
+  // Pull previous Telegram chats through the pipeline, then reload.
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncMsg('');
+    setError('');
+    try {
+      const res = await apiFetch('/api/telegram/sync', { method: 'POST', body: {}, token });
+      setSyncMsg(t.syncDone(res?.saved ?? 0));
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const visible = useMemo(
     () => (onlyClients ? leads.filter((l) => l.role === 'client') : leads),
     [leads, onlyClients]
@@ -104,7 +131,14 @@ export default function InboxPage() {
           <h1>{t.title}</h1>
           <div className="desc">{t.desc}</div>
         </div>
-        <div className="actions desc tabular">{t.count(visible.length)}</div>
+        <div className="actions">
+          {source === 'telegram' && (
+            <button className="btn accent" onClick={handleSync} disabled={syncing}>
+              {syncing ? t.syncing : t.sync}
+            </button>
+          )}
+          <span className="desc tabular">{t.count(visible.length)}</span>
+        </div>
       </div>
 
       <div className="content">
@@ -129,6 +163,7 @@ export default function InboxPage() {
         </div>
 
         {error && <div className="form-error">{error}</div>}
+        {syncMsg && <div className="form-notice">{syncMsg}</div>}
         {!loading && visible.length === 0 && (
           <div className="empty-note">{onlyClients ? t.emptyClients : t.empty}</div>
         )}

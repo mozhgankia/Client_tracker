@@ -11,6 +11,7 @@ const {
   startTelegramListener,
   getConnectionInfo: getTelegramConnectionInfo,
   disconnectTelegram,
+  syncNow: syncTelegramNow,
 } = require('./telegram/listener');
 const { startPhoneLogin, submitCode, submitPassword } = require('./telegram/authFlow');
 const {
@@ -149,6 +150,15 @@ app.post('/api/telegram/verify-password', requireAuth, async (req, res) => {
 
 app.get('/api/telegram/status', requireAuth, (req, res) => {
   res.json(getTelegramConnectionInfo(req.userId));
+});
+
+// Back-fill recent Telegram history on demand (dashboard "Sync" button).
+app.post('/api/telegram/sync', requireAuth, async (req, res) => {
+  try {
+    res.json(await syncTelegramNow(req.userId));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 app.post('/api/telegram/disconnect', requireAuth, async (req, res) => {

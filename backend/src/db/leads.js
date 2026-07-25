@@ -50,6 +50,24 @@ async function getLead(userId, id) {
   return data;
 }
 
+/** True if this exact message from this sender was already saved — used to
+ *  dedup history sync so re-running it never creates duplicate leads. */
+async function leadExists(userId, { source, telegramId, phone, rawMessage }) {
+  if (!rawMessage) return false;
+  let query = supabase
+    .from('leads')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('source', source)
+    .eq('raw_message', rawMessage)
+    .limit(1);
+  if (telegramId) query = query.eq('telegram_id', telegramId);
+  else if (phone) query = query.eq('phone', phone);
+  const { data, error } = await query;
+  if (error) return false; // on error, don't block saving
+  return Array.isArray(data) && data.length > 0;
+}
+
 /** All non-dismissed personal (direct-chat) leads for a tenant, grouped by role
  *  for the classification board (owners / clients / unknown). Group/A2A leads
  *  are excluded — they belong to the colleague-market board, not here. */
@@ -173,6 +191,7 @@ async function convertLeadToProperty(userId, id, overrides = {}) {
 
 module.exports = {
   saveLead,
+  leadExists,
   listLeads,
   listActiveLeads,
   listGroupLeads,
