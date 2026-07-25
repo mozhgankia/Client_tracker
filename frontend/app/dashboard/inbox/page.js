@@ -26,7 +26,9 @@ const STRINGS = {
     count: (n) => `${n} مخاطب`,
     sync: '🔄 همگام‌سازی تلگرام',
     syncing: 'در حال همگام‌سازی…',
-    syncDone: (n) => `همگام‌سازی شد — ${n} مورد تازه اضافه شد`,
+    syncDone: (s) =>
+      `همگام‌سازی: ${s.dialogs ?? 0} گفتگو · ${s.messages ?? 0} پیام · ${s.candidates ?? 0} مرتبط · ${s.saved ?? 0} ذخیره‌شده` +
+      (s.failed ? ` · ${s.failed} خطا (کلید هوش مصنوعی را چک کنید)` : ''),
   },
   en: {
     title: '📨 Inbox',
@@ -44,7 +46,9 @@ const STRINGS = {
     count: (n) => `${n} contacts`,
     sync: '🔄 Sync Telegram',
     syncing: 'Syncing…',
-    syncDone: (n) => `Synced — ${n} new added`,
+    syncDone: (s) =>
+      `Synced: ${s.dialogs ?? 0} dialogs · ${s.messages ?? 0} msgs · ${s.candidates ?? 0} relevant · ${s.saved ?? 0} saved` +
+      (s.failed ? ` · ${s.failed} errors (check AI key)` : ''),
   },
   ar: {
     title: '📨 صندوق الرسائل',
@@ -62,7 +66,9 @@ const STRINGS = {
     count: (n) => `${n} جهة اتصال`,
     sync: '🔄 مزامنة تيليجرام',
     syncing: 'جارٍ المزامنة…',
-    syncDone: (n) => `تمت المزامنة — أُضيف ${n} جديد`,
+    syncDone: (s) =>
+      `المزامنة: ${s.dialogs ?? 0} محادثة · ${s.messages ?? 0} رسالة · ${s.candidates ?? 0} ذات صلة · ${s.saved ?? 0} محفوظة` +
+      (s.failed ? ` · ${s.failed} أخطاء (تحقق من مفتاح الذكاء الاصطناعي)` : ''),
   },
 };
 
@@ -110,7 +116,7 @@ export default function InboxPage() {
     setError('');
     try {
       const res = await apiFetch('/api/telegram/sync', { method: 'POST', body: {}, token });
-      setSyncMsg(t.syncDone(res?.saved ?? 0));
+      setSyncMsg(t.syncDone(res || {}));
       await load();
     } catch (err) {
       setError(err.message);

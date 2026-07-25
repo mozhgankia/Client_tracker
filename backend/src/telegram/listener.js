@@ -96,20 +96,18 @@ async function startTelegramListener(userId) {
 /**
  * Shared message → lead pipeline for both the live handler and the history
  * sync: keyword pre-filter → dedup → AI extraction → (personal-only keyword
- * classification) → saveLead. Returns true if a new lead was stored.
+ * classification) → saveLead. Returns 'saved' | 'dedup' | 'irrelevant'.
  */
 async function processTelegramMessage(userId, { text, sender, chatId, isPrivate }) {
-  if (!isLikelyRealEstateMessage(text)) return false; // cheap filter before any AI/DB work
-
-  const senderName = sender ? [sender.firstName, sender.lastName].filter(Boolean).join(' ') : undefined;
-  const telegramId = sender && sender.id ? String(sender.id) : undefined;
+  const senderName = sender ? [sender.firstName, sender.lastName].filter(Boolean).join(' ').trim() : undefined;
+  const telegramId = sender && sender.id != null ? String(sender.id) : undefined;
   const phone = sender && sender.phone ? sender.phone : null;
 
   // Skip anything we've already stored (so history sync never duplicates).
-  if (await leadExists(userId, { source: 'telegram', telegramId, phone, rawMessage: text })) return false;
+  if (await leadExists(userId, { source: 'telegram', telegramId, phone, rawMessage: text })) return 'dedup';
 
   const extracted = await extractLeadFromMessage(text, { senderName });
-  if (!extracted.is_relevant) return false;
+  if (!extracted.is_relevant) return 'irrelevant';
 
   // A private 1:1 chat is a personal lead; groups/channels are the A2A market.
   const context = isPrivate ? 'direct' : 'group';
@@ -120,69 +118,98 @@ async function processTelegramMessage(userId, { text, sender, chatId, isPrivate 
   await saveLead(userId, extracted, {
     source: 'telegram',
     chatId: String(chatId),
-    senderName,
+    senderName: senderName || null,
     telegramId,
     phone,
     rawMessage: text,
     context,
   });
-  return true;
+  return 'saved';
 }
 
 async function handleNewMessage(userId, event) {
   const message = event.message;
-  const sender = await message.getSender().catch(() => null);
-  const saved = await processTelegramMessage(userId, {
-    text: message.message,
+  if (message.out) return; // ignore our own outgoing messages
+  const text = message.message;
+  if (!text || !isLikelyRealEstateMessage(text)) return;
+  const sender = message.sender || (await message.getSender().catch(() => null));
+  const result = await processTelegramMessage(userId, {
+    text,
     sender,
     chatId: message.chatId,
     isPrivate: message.isPrivate,
   });
-  if (saved) console.log(`[telegram] لید زنده ذخیره شد (کاربر ${userId})`);
+  if (result === 'saved') console.log(`[telegram] لید زنده ذخیره شد (کاربر ${userId})`);
 }
 
 /**
- * Back-fills recent Telegram history through the same pipeline. Bounded so it
- * can't run the AI thousands of times: scans the most recent dialogs and their
- * recent messages, and stops after MAX_AI_CALLS keyword-matching messages.
- * @returns {Promise<{scanned:number, saved:number}>}
+ * Back-fills recent Telegram history through the same pipeline, and returns
+ * detailed counts so we can see exactly where messages drop out. Bounded so it
+ * never runs the AI thousands of times.
+ * @returns {Promise<{dialogs:number, messages:number, candidates:number, saved:number, irrelevant:number, dedup:number, failed:number}>}
  */
 async function syncTelegramHistory(userId, client, opts = {}) {
-  const maxDialogs = opts.maxDialogs || 30;
-  const perDialog = opts.perDialog || 40;
-  const maxAiCalls = opts.maxAiCalls || 250;
-  const stats = { scanned: 0, saved: 0 };
+  const maxDialogs = opts.maxDialogs || 40;
+  const perDialog = opts.perDialog || 60;
+  const maxAiCalls = opts.maxAiCalls || 300;
+  const stats = { dialogs: 0, messages: 0, candidates: 0, saved: 0, irrelevant: 0, dedup: 0, failed: 0 };
 
-  const dialogs = await client.getDialogs({ limit: maxDialogs });
+  let dialogs;
+  try {
+    dialogs = await client.getDialogs({ limit: maxDialogs });
+  } catch (err) {
+    console.error(`[telegram] getDialogs شکست خورد (کاربر ${userId}):`, err.message);
+    throw err;
+  }
+  console.log(`[telegram] همگام‌سازی: ${dialogs.length} گفتگو یافت شد (کاربر ${userId})`);
+
   for (const dialog of dialogs) {
-    if (stats.scanned >= maxAiCalls) break;
+    if (stats.candidates >= maxAiCalls) break;
+    stats.dialogs++;
     const isPrivate = Boolean(dialog.isUser);
+    const target = dialog.entity || dialog.inputEntity || dialog.id;
+    if (!target) continue;
+
     let messages;
     try {
-      messages = await client.getMessages(dialog.entity || dialog.inputEntity, { limit: perDialog });
+      messages = await client.getMessages(target, { limit: perDialog });
     } catch (err) {
-      continue; // skip dialogs we can't read
+      console.warn(`[telegram] خواندن پیام‌های «${dialog.title || dialog.name || dialog.id}» شکست خورد:`, err.message);
+      continue;
     }
+
+    let candidatesHere = 0;
     for (const message of messages) {
       const text = message.message;
-      if (!text || stats.scanned >= maxAiCalls) continue;
+      if (!text || message.out) continue; // no text, or our own message
+      stats.messages++;
       if (!isLikelyRealEstateMessage(text)) continue; // gate AI calls
-      stats.scanned++;
+      if (stats.candidates >= maxAiCalls) break;
+      stats.candidates++;
+      candidatesHere++;
       try {
-        const sender = await message.getSender().catch(() => null);
-        const saved = await processTelegramMessage(userId, {
+        const sender = message.sender || (await message.getSender().catch(() => null));
+        const result = await processTelegramMessage(userId, {
           text,
           sender,
           chatId: message.chatId ?? dialog.id,
           isPrivate,
         });
-        if (saved) stats.saved++;
+        stats[result] = (stats[result] || 0) + 1; // saved | dedup | irrelevant
       } catch (err) {
-        // one bad message shouldn't abort the whole sync
+        stats.failed++;
       }
     }
+    if (candidatesHere) {
+      console.log(`[telegram] «${dialog.title || dialog.name || dialog.id}»: ${candidatesHere} پیام مرتبط`);
+    }
   }
-  console.log(`[telegram] همگام‌سازی تمام شد (کاربر ${userId}): ${stats.saved} لید از ${stats.scanned} پیام مرتبط`);
+
+  console.log(
+    `[telegram] همگام‌سازی تمام شد (کاربر ${userId}): ` +
+      `${stats.dialogs} گفتگو، ${stats.messages} پیام، ${stats.candidates} مرتبط، ` +
+      `${stats.saved} ذخیره، ${stats.irrelevant} نامرتبط، ${stats.dedup} تکراری`
+  );
   return stats;
 }
 
