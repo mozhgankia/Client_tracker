@@ -21,6 +21,8 @@ const { saveLead } = require('../db/leads');
 const { getChat, upsertChat } = require('../db/chats');
 const { getSettings } = require('../db/settings');
 const { resolveRole } = require('../classify/classifier');
+const { scoreMessage, updateProfile } = require('../engine/realEstateEngine');
+const { classifyAndUpsertChat } = require('../engine/classifyChat');
 const supabase = require('../db/supabaseClient');
 
 // Baileys rotates the QR roughly every 20s until it's scanned; used to give
@@ -193,28 +195,14 @@ async function handleIncomingMessage(userId, msg) {
   const phone = senderJid ? senderJid.split('@')[0].split(':')[0] : null;
   const senderName = msg.pushName || undefined;
 
-  // Only real-estate messages hit the AI (cost control); classify once and
-  // reuse the result for both the inbox chat label and the lead/A2A pipeline.
-  const relevant = isLikelyRealEstateMessage(text);
-  let extracted = relevant ? await extractLeadFromMessage(text, { senderName }) : null;
-  if (extracted && extracted.is_relevant && context === 'direct') {
-    extracted.role = resolveRole(extracted, text, await getSettings(userId));
-  }
-
-  // Inbox: record every chat (not just real-estate ones), labelled only when
-  // the AI actually classified a relevant message; never overwrite a manual label.
+  // Inbox + engine: refresh the chat and run the Real-Estate Engine on this
+  // message (same classifier as Telegram). Gemini is used only via the engine's
+  // smart gate, so a manual mark is preserved and cost stays low.
   try {
     const existing = await getChat(userId, 'whatsapp', jid);
-    let role = existing?.role || 'unknown';
-    let roleSource = existing?.role_source || 'ai';
-    if (extracted && extracted.is_relevant && extracted.role && roleSource !== 'manual') {
-      role = extracted.role;
-      roleSource = 'ai';
-    }
-    await upsertChat(userId, {
-      source: 'whatsapp',
+    await classifyAndUpsertChat(userId, 'whatsapp', {
       chatId: jid,
-      context,
+      text,
       chatType: isGroup ? 'group' : 'private',
       name: existing?.name || senderName || phone,
       phone,
@@ -222,14 +210,19 @@ async function handleIncomingMessage(userId, msg) {
       lastMessage: text,
       lastMessageAt: new Date().toISOString(),
       unread: (existing?.unread || 0) + 1,
-      role,
-      roleSource,
+      senderName,
     });
   } catch (err) {
     console.error(`[whatsapp:${userId}] به‌روزرسانی چت شکست خورد:`, err.message);
   }
 
+  // Leads / A2A: only real-estate messages feed the leads page + A2A board.
+  if (!isLikelyRealEstateMessage(text)) return;
+  const extracted = await extractLeadFromMessage(text, { senderName }).catch(() => null);
   if (!extracted || !extracted.is_relevant) return; // not a lead
+  if (context === 'direct') {
+    extracted.role = resolveRole(extracted, text, await getSettings(userId));
+  }
 
   await saveLead(userId, extracted, {
     source: 'whatsapp',
@@ -299,22 +292,50 @@ async function handleHistorySync(userId, { chats = [], contacts = [], messages =
     const name = chat.name || nameByJid.get(jid) || phone || jid;
     const last = lastByJid.get(jid);
     const tsNum = tsToNumber(chat.conversationTimestamp) || (last ? last.ts : 0);
+    const chatType = isGroup ? 'group' : 'private';
+    const preview = (last && last.text) || null;
     try {
-      const existing = await getChat(userId, 'whatsapp', jid);
+      const existing = (await getChat(userId, 'whatsapp', jid)) || {};
+      const manual = existing.role_source === 'manual';
+      const seeded = (existing.signals && existing.signals.messages) || 0;
+
+      // Seed the engine once from the last message for a brand-new chat (no AI,
+      // so history sync always works); leave an already-profiled chat as-is.
+      let engineFields;
+      if (!manual && seeded === 0 && preview) {
+        const res = updateProfile(existing, scoreMessage(preview, { chatType }), {});
+        engineFields = {
+          role: res.role,
+          roleSource: res.roleSource,
+          signals: res.signals,
+          confidence: res.confidence,
+          needsReview: res.needsReview,
+          extracted: res.extracted,
+        };
+      } else {
+        engineFields = {
+          role: existing.role || 'unknown',
+          roleSource: existing.role_source || 'ai',
+          signals: existing.signals || {},
+          confidence: existing.confidence || 0,
+          needsReview: Boolean(existing.needs_review),
+          extracted: existing.extracted || {},
+        };
+      }
+
       await upsertChat(userId, {
         source: 'whatsapp',
         chatId: jid,
         context: isGroup ? 'group' : 'direct',
-        chatType: isGroup ? 'group' : 'private',
+        chatType,
         name,
         phone,
         telegramId: null,
-        lastMessage: (last && last.text) || existing?.last_message || null,
-        lastMessageAt: tsNum ? new Date(tsNum * 1000).toISOString() : existing?.last_message_at || null,
+        lastMessage: preview || existing.last_message || null,
+        lastMessageAt: tsNum ? new Date(tsNum * 1000).toISOString() : existing.last_message_at || null,
         unread:
-          typeof chat.unreadCount === 'number' && chat.unreadCount > 0 ? chat.unreadCount : existing?.unread || 0,
-        role: existing?.role || 'unknown',
-        roleSource: existing?.role_source || 'ai',
+          typeof chat.unreadCount === 'number' && chat.unreadCount > 0 ? chat.unreadCount : existing.unread || 0,
+        ...engineFields,
       });
       count++;
     } catch (err) {

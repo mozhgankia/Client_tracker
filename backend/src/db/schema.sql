@@ -151,6 +151,16 @@ create table if not exists chats (
   unread integer not null default 0,
   role text not null default 'unknown', -- owner | client | colleague | unknown
   role_source text not null default 'ai',
+  -- Real-Estate AI Engine state (see backend/src/engine/realEstateEngine.js):
+  -- `signals` = the contact's accumulated weighted intent scores
+  --   {client, owner, colleague, messages}; `confidence` = 0..100 for the
+  --   current label; `needs_review` = confidence below the lock threshold;
+  --   `extracted` = merged structured values {region, price, area_sqft,
+  --   bedrooms, request_type, property_type}.
+  signals jsonb not null default '{}'::jsonb,
+  confidence integer not null default 0,
+  needs_review boolean not null default false,
+  extracted jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -159,6 +169,10 @@ create index if not exists chats_user_source_idx on chats(user_id, source);
 -- for databases that created `chats` before these columns existed:
 alter table chats add column if not exists chat_type text;
 alter table chats add column if not exists unread integer not null default 0;
+alter table chats add column if not exists signals jsonb not null default '{}'::jsonb;
+alter table chats add column if not exists confidence integer not null default 0;
+alter table chats add column if not exists needs_review boolean not null default false;
+alter table chats add column if not exists extracted jsonb not null default '{}'::jsonb;
 
 -- Single-use password-reset tokens (emailed to the user). Rows are deleted on
 -- use and ignored once expired.

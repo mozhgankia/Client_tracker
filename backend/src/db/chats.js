@@ -32,6 +32,10 @@ async function upsertChat(userId, c) {
     unread: c.unread || 0,
     role: c.role || 'unknown',
     role_source: c.roleSource || 'ai',
+    signals: c.signals || {},
+    confidence: c.confidence || 0,
+    needs_review: c.needsReview || false,
+    extracted: c.extracted || {},
     updated_at: new Date().toISOString(),
   };
   const { error } = await supabase.from('chats').upsert(row, { onConflict: 'user_id,source,chat_id' });

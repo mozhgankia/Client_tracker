@@ -30,6 +30,8 @@ const { saveLead, leadExists } = require('../db/leads');
 const { getChat, upsertChat } = require('../db/chats');
 const { getSettings } = require('../db/settings');
 const { resolveRole } = require('../classify/classifier');
+const { scoreMessage, updateProfile } = require('../engine/realEstateEngine');
+const { classifyAndUpsertChat } = require('../engine/classifyChat');
 
 const apiId = Number(process.env.TELEGRAM_API_ID);
 const apiHash = process.env.TELEGRAM_API_HASH;
@@ -142,6 +144,13 @@ function senderDisplayName(sender, fallback) {
   return n || sender?.username || fallback;
 }
 
+// message.isPrivate / isGroup / isChannel → our chat_type.
+function messageChatType(message) {
+  if (message.isPrivate) return 'private';
+  if (message.isChannel && !message.isGroup) return 'channel';
+  return 'group';
+}
+
 // A messenger-style preview for a chat's last message: the text if there is
 // one, otherwise a short media placeholder (like WhatsApp/Telegram show).
 function lastMessagePreview(message) {
@@ -199,27 +208,23 @@ async function handleNewMessage(userId, event, entry) {
   const sender = message.sender || (await message.getSender().catch(() => null));
   const preview = lastMessagePreview(message);
 
-  // Inbox: keep the chat's last message + unread fresh for every message,
-  // without any AI call (labels stay stable — see file header).
+  // Inbox + engine: refresh the chat's last message/unread and run the
+  // Real-Estate Engine on this message to keep the contact's classification
+  // (role, confidence, extracted values) current.
   try {
     const chatId = String(message.chatId);
     const existing = await getChat(userId, 'telegram', chatId);
-    const chatType = message.isPrivate ? 'private' : message.isChannel && !message.isGroup ? 'channel' : 'group';
-    const displayName =
-      existing?.name || senderDisplayName(sender, chatId);
-    await upsertChat(userId, {
-      source: 'telegram',
+    await classifyAndUpsertChat(userId, 'telegram', {
       chatId,
-      context: message.isPrivate ? 'direct' : 'group',
-      chatType,
-      name: displayName,
+      text,
+      chatType: messageChatType(message),
+      name: existing?.name || senderDisplayName(sender, chatId),
       phone: sender?.phone ? `+${sender.phone}` : existing?.phone || null,
       telegramId: sender?.id != null ? String(sender.id) : existing?.telegram_id || null,
       lastMessage: preview || existing?.last_message || null,
       lastMessageAt: message.date ? new Date(message.date * 1000).toISOString() : new Date().toISOString(),
       unread: (existing?.unread || 0) + 1,
-      role: existing?.role || 'unknown',
-      roleSource: existing?.role_source || 'ai',
+      senderName: senderDisplayName(sender, undefined),
     });
   } catch (err) {
     console.error(`[telegram] به‌روزرسانی چت شکست خورد:`, err.message);
@@ -289,22 +294,48 @@ async function syncTelegramHistory(userId, client, opts = {}) {
     }
 
     try {
-      const existing = await getChat(userId, 'telegram', chatId);
+      const existing = (await getChat(userId, 'telegram', chatId)) || {};
+      const manual = existing.role_source === 'manual';
+      const seeded = (existing.signals && existing.signals.messages) || 0;
+
+      // Seed the engine from the last message ONLY for a brand-new chat (no
+      // accumulated signals yet), so repeated syncs never double-count. For an
+      // already-profiled chat keep its current classification untouched. Sync
+      // stays AI-free, so it always works even without an AI key.
+      let engineFields;
+      if (!manual && seeded === 0 && preview) {
+        const res = updateProfile(existing, scoreMessage(preview, { chatType }), {});
+        engineFields = {
+          role: res.role,
+          roleSource: res.roleSource,
+          signals: res.signals,
+          confidence: res.confidence,
+          needsReview: res.needsReview,
+          extracted: res.extracted,
+        };
+      } else {
+        engineFields = {
+          role: existing.role || 'unknown',
+          roleSource: existing.role_source || 'ai',
+          signals: existing.signals || {},
+          confidence: existing.confidence || 0,
+          needsReview: Boolean(existing.needs_review),
+          extracted: existing.extracted || {},
+        };
+      }
+
       await upsertChat(userId, {
         source: 'telegram',
         chatId,
         context: chatType === 'private' ? 'direct' : 'group',
         chatType,
         name,
-        phone: entity?.phone ? `+${entity.phone}` : existing?.phone || null,
-        telegramId: entity?.id != null ? String(entity.id) : existing?.telegram_id || null,
-        lastMessage: preview || existing?.last_message || null,
-        lastMessageAt: lastAt || existing?.last_message_at || null,
+        phone: entity?.phone ? `+${entity.phone}` : existing.phone || null,
+        telegramId: entity?.id != null ? String(entity.id) : existing.telegram_id || null,
+        lastMessage: preview || existing.last_message || null,
+        lastMessageAt: lastAt || existing.last_message_at || null,
         unread: typeof dialog.unreadCount === 'number' ? dialog.unreadCount : 0,
-        // Never relabel here: keep the user's manual mark, or the existing one,
-        // or start fresh at 'unknown'. Sync does no AI classification.
-        role: existing?.role || 'unknown',
-        roleSource: existing?.role_source || 'ai',
+        ...engineFields,
       });
       stats.chats++;
     } catch (err) {

@@ -24,6 +24,12 @@ const STRINGS = {
     client: 'مشتری',
     colleague: 'همکار',
     unknown: 'نامشخص',
+    review: 'نیازمند بازبینی',
+    reviewTag: 'بازبینی',
+    reqBuy: 'خرید',
+    reqSell: 'فروش',
+    reqRent: 'اجاره',
+    reqMortgage: 'وام',
     count: (n) => `${n} گفتگو`,
     sync: '🔄 همگام‌سازی تلگرام',
     syncing: 'در حال همگام‌سازی…',
@@ -49,6 +55,12 @@ const STRINGS = {
     client: 'Client',
     colleague: 'Colleague',
     unknown: 'Unknown',
+    review: 'Needs review',
+    reviewTag: 'review',
+    reqBuy: 'buy',
+    reqSell: 'sell',
+    reqRent: 'rent',
+    reqMortgage: 'mortgage',
     count: (n) => `${n} conversations`,
     sync: '🔄 Sync Telegram',
     syncing: 'Syncing…',
@@ -74,6 +86,12 @@ const STRINGS = {
     client: 'عميل',
     colleague: 'زميل',
     unknown: 'غير معروف',
+    review: 'بحاجة لمراجعة',
+    reviewTag: 'مراجعة',
+    reqBuy: 'شراء',
+    reqSell: 'بيع',
+    reqRent: 'إيجار',
+    reqMortgage: 'تمويل',
     count: (n) => `${n} محادثة`,
     sync: '🔄 مزامنة تيليجرام',
     syncing: 'جارٍ المزامنة…',
@@ -115,6 +133,24 @@ function formatTime(iso, lang) {
 }
 
 const TYPE_ICON = { private: '👤', group: '👥', channel: '📢' };
+
+// Compact AED price, e.g. 2,500,000 → "2.5M", 95,000 → "95k".
+function formatPrice(n) {
+  if (!n || Number.isNaN(Number(n))) return null;
+  const v = Number(n);
+  if (v >= 1e6) return `${(v / 1e6).toFixed(v % 1e6 ? 1 : 0)}M`;
+  if (v >= 1e3) return `${Math.round(v / 1e3)}k`;
+  return String(v);
+}
+
+// The extracted-value chips shown under a chat (region, price, beds, request).
+function extractedChips(chat, t) {
+  const x = chat.extracted || {};
+  const req = { buy: t.reqBuy, sell: t.reqSell, rent: t.reqRent, mortgage: t.reqMortgage }[x.request_type];
+  const bed = x.bedrooms === 0 ? 'Studio' : x.bedrooms != null ? `${x.bedrooms}🛏` : null;
+  const price = formatPrice(x.price);
+  return [req, x.region, bed, price && `${price} AED`].filter(Boolean);
+}
 
 export default function InboxPage() {
   const { token } = useAuth();
@@ -196,25 +232,35 @@ export default function InboxPage() {
     }
   };
 
-  const visible = useMemo(
-    () => (folder === 'all' ? chats : chats.filter((c) => (c.role || 'unknown') === folder)),
-    [chats, folder]
-  );
+  // A chat belongs in a category folder only when its label is confident (or
+  // set by hand); low-confidence guesses live in "needs review" so a wrong
+  // contact never lands in a clean folder.
+  const inFolder = useCallback((c, key) => {
+    const role = c.role || 'unknown';
+    const manual = c.role_source === 'manual';
+    if (key === 'all') return true;
+    if (key === 'review') return c.needs_review && !manual;
+    if (key === 'unknown') return role === 'unknown';
+    return role === key && (manual || !c.needs_review);
+  }, []);
 
-  // Category "folders" — همه + the four labels, each showing its own count.
+  const visible = useMemo(() => chats.filter((c) => inFolder(c, folder)), [chats, folder, inFolder]);
+
+  // Category "folders" — each showing its own count.
   const FOLDERS = useMemo(
     () => [
       { key: 'all', label: t.all },
       { key: 'client', label: t.client },
       { key: 'owner', label: t.owner },
       { key: 'colleague', label: t.colleague },
+      { key: 'review', label: t.review },
       { key: 'unknown', label: t.unknown },
     ],
     [t]
   );
   const folderCount = useCallback(
-    (key) => (key === 'all' ? chats.length : chats.filter((c) => (c.role || 'unknown') === key).length),
-    [chats]
+    (key) => chats.filter((c) => inFolder(c, key)).length,
+    [chats, inFolder]
   );
 
   return (
@@ -269,6 +315,10 @@ export default function InboxPage() {
           {visible.map((chat) => {
             const name = chat.name || chat.phone || chat.telegram_id || '—';
             const type = chat.chat_type || (chat.context === 'group' ? 'group' : 'private');
+            const chips = extractedChips(chat, t);
+            const conf = Number(chat.confidence) || 0;
+            const manual = chat.role_source === 'manual';
+            const showConf = (chat.role && chat.role !== 'unknown') || conf > 0;
             return (
               <div className="chat-row" key={chat.id}>
                 <div className="chat-avatar" style={{ background: avatarColor(name) }}>
@@ -286,6 +336,13 @@ export default function InboxPage() {
                     <span className="chat-preview">{chat.last_message || ''}</span>
                     {chat.unread > 0 && <span className="chat-unread">{chat.unread}</span>}
                   </div>
+                  {chips.length > 0 && (
+                    <div className="chat-chips">
+                      {chips.map((c, i) => (
+                        <span className="ex-chip" key={i}>{c}</span>
+                      ))}
+                    </div>
+                  )}
                   <div className="chat-line3">
                     <select
                       className={`role-select role-${chat.role || 'unknown'}`}
@@ -297,6 +354,14 @@ export default function InboxPage() {
                       <option value="colleague">{t.colleague}</option>
                       <option value="unknown">{t.unknown}</option>
                     </select>
+                    {manual ? (
+                      <span className="conf-badge manual">✓</span>
+                    ) : (
+                      showConf && (
+                        <span className={`conf-badge${conf >= 65 ? ' hi' : ' mid'}`}>{conf}%</span>
+                      )
+                    )}
+                    {chat.needs_review && !manual && <span className="review-tag">⚠ {t.reviewTag}</span>}
                   </div>
                 </div>
               </div>
