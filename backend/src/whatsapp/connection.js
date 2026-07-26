@@ -18,6 +18,7 @@ const { useSupabaseAuthState } = require('./supabaseAuthState');
 const { isLikelyRealEstateMessage } = require('../shared/keywordFilter');
 const { extractLeadFromMessage } = require('../ai/geminiExtract');
 const { saveLead } = require('../db/leads');
+const { getChat, upsertChat } = require('../db/chats');
 const { getSettings } = require('../db/settings');
 const { resolveRole } = require('../classify/classifier');
 const supabase = require('../db/supabaseClient');
@@ -177,22 +178,48 @@ async function handleIncomingMessage(userId, msg) {
     msg.message.extendedTextMessage?.text ||
     msg.message.imageMessage?.caption ||
     '';
-  if (!isLikelyRealEstateMessage(text)) return; // فیلتر ارزان قبل از فراخوانی AI
+  if (!text) return;
 
   // In a group the sender is the participant, not the chat jid.
   const senderJid = isGroup ? msg.key.participant : jid;
   const phone = senderJid ? senderJid.split('@')[0].split(':')[0] : null;
   const senderName = msg.pushName || undefined;
 
-  const extracted = await extractLeadFromMessage(text, { senderName });
-  if (!extracted.is_relevant) return;
-
-  // Keyword classification is for PERSONAL chats only. In groups (A2A market)
-  // we keep the AI's owner/client call as-is and never apply the tenant's
-  // personal buyer/owner keywords.
-  if (context === 'direct') {
+  // Only real-estate messages hit the AI (cost control); classify once and
+  // reuse the result for both the inbox chat label and the lead/A2A pipeline.
+  const relevant = isLikelyRealEstateMessage(text);
+  let extracted = relevant ? await extractLeadFromMessage(text, { senderName }) : null;
+  if (extracted && extracted.is_relevant && context === 'direct') {
     extracted.role = resolveRole(extracted, text, await getSettings(userId));
   }
+
+  // Inbox: record every chat (not just real-estate ones), labelled only when
+  // the AI actually classified a relevant message; never overwrite a manual label.
+  try {
+    const existing = await getChat(userId, 'whatsapp', jid);
+    let role = existing?.role || 'unknown';
+    let roleSource = existing?.role_source || 'ai';
+    if (extracted && extracted.is_relevant && extracted.role && roleSource !== 'manual') {
+      role = extracted.role;
+      roleSource = 'ai';
+    }
+    await upsertChat(userId, {
+      source: 'whatsapp',
+      chatId: jid,
+      context,
+      name: senderName || phone,
+      phone,
+      telegramId: null,
+      lastMessage: text,
+      lastMessageAt: new Date().toISOString(),
+      role,
+      roleSource,
+    });
+  } catch (err) {
+    console.error(`[whatsapp:${userId}] به‌روزرسانی چت شکست خورد:`, err.message);
+  }
+
+  if (!extracted || !extracted.is_relevant) return; // not a lead
 
   await saveLead(userId, extracted, {
     source: 'whatsapp',

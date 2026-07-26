@@ -131,6 +131,30 @@ create table if not exists user_settings (
   updated_at timestamptz not null default now()
 );
 
+-- Inbox chats: one row per Telegram/WhatsApp conversation the account has, so
+-- the "Inbox" mirrors the messenger's own chat list (NOT filtered to real
+-- estate). The AI just labels each chat's `role` (owner/client/unknown) so the
+-- "clients only" filter works; chats are never hidden for lacking keywords.
+-- `role_source` = 'manual' means the user overrode the AI label.
+create table if not exists chats (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  source text not null,                 -- telegram | whatsapp
+  chat_id text not null,                -- messenger's dialog/chat id
+  context text not null default 'direct',
+  name text,
+  phone text,
+  telegram_id text,
+  last_message text,
+  last_message_at timestamptz,
+  role text not null default 'unknown', -- owner | client | unknown
+  role_source text not null default 'ai',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists chats_user_source_chat_uidx on chats(user_id, source, chat_id);
+create index if not exists chats_user_source_idx on chats(user_id, source);
+
 -- Single-use password-reset tokens (emailed to the user). Rows are deleted on
 -- use and ignored once expired.
 create table if not exists password_resets (

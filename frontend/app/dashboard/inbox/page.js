@@ -27,8 +27,8 @@ const STRINGS = {
     sync: '🔄 همگام‌سازی تلگرام',
     syncing: 'در حال همگام‌سازی…',
     syncDone: (s) =>
-      `همگام‌سازی: ${s.dialogs ?? 0} گفتگو · ${s.messages ?? 0} پیام · ${s.candidates ?? 0} مرتبط · ${s.saved ?? 0} ذخیره‌شده` +
-      (s.failed ? ` · ${s.failed} خطا (کلید هوش مصنوعی را چک کنید)` : ''),
+      `همگام‌سازی شد: ${s.chats ?? 0} چت از ${s.dialogs ?? 0} گفتگو · ${s.labeled ?? 0} برچسب‌خورده` +
+      (s.failed ? ` · ${s.failed} خطا` : ''),
   },
   en: {
     title: '📨 Inbox',
@@ -47,8 +47,8 @@ const STRINGS = {
     sync: '🔄 Sync Telegram',
     syncing: 'Syncing…',
     syncDone: (s) =>
-      `Synced: ${s.dialogs ?? 0} dialogs · ${s.messages ?? 0} msgs · ${s.candidates ?? 0} relevant · ${s.saved ?? 0} saved` +
-      (s.failed ? ` · ${s.failed} errors (check AI key)` : ''),
+      `Synced: ${s.chats ?? 0} chats from ${s.dialogs ?? 0} dialogs · ${s.labeled ?? 0} labeled` +
+      (s.failed ? ` · ${s.failed} errors` : ''),
   },
   ar: {
     title: '📨 صندوق الرسائل',
@@ -67,8 +67,8 @@ const STRINGS = {
     sync: '🔄 مزامنة تيليجرام',
     syncing: 'جارٍ المزامنة…',
     syncDone: (s) =>
-      `المزامنة: ${s.dialogs ?? 0} محادثة · ${s.messages ?? 0} رسالة · ${s.candidates ?? 0} ذات صلة · ${s.saved ?? 0} محفوظة` +
-      (s.failed ? ` · ${s.failed} أخطاء (تحقق من مفتاح الذكاء الاصطناعي)` : ''),
+      `تمت المزامنة: ${s.chats ?? 0} محادثة من ${s.dialogs ?? 0} · ${s.labeled ?? 0} موسومة` +
+      (s.failed ? ` · ${s.failed} أخطاء` : ''),
   },
 };
 
@@ -77,9 +77,9 @@ export default function InboxPage() {
   const { lang } = useLanguage();
   const t = STRINGS[lang] || STRINGS.fa;
 
-  const [source, setSource] = useState('whatsapp'); // 'whatsapp' | 'telegram'
+  const [source, setSource] = useState('telegram'); // 'telegram' | 'whatsapp'
   const [onlyClients, setOnlyClients] = useState(false);
-  const [leads, setLeads] = useState([]);
+  const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [syncing, setSyncing] = useState(false);
@@ -88,7 +88,7 @@ export default function InboxPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setLeads(await apiFetch(`/api/leads?source=${source}`, { token }));
+      setChats(await apiFetch(`/api/chats?source=${source}`, { token }));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -102,7 +102,7 @@ export default function InboxPage() {
 
   const setRole = async (id, role) => {
     try {
-      await apiFetch(`/api/classification/${id}/role`, { method: 'POST', body: { role }, token });
+      await apiFetch(`/api/chats/${id}/role`, { method: 'POST', body: { role }, token });
       await load();
     } catch (err) {
       setError(err.message);
@@ -126,8 +126,8 @@ export default function InboxPage() {
   };
 
   const visible = useMemo(
-    () => (onlyClients ? leads.filter((l) => l.role === 'client') : leads),
-    [leads, onlyClients]
+    () => (onlyClients ? chats.filter((c) => c.role === 'client') : chats),
+    [chats, onlyClients]
   );
 
   return (
@@ -175,22 +175,23 @@ export default function InboxPage() {
         )}
 
         <div className="card-list">
-          {visible.map((lead) => (
-            <div className="lead-card" key={lead.id}>
+          {visible.map((chat) => (
+            <div className="lead-card" key={chat.id}>
               <div className="who">
-                <div className="name">{lead.sender_name || lead.phone || lead.telegram_id}</div>
-                <div className="meta">
-                  {lead.phone && <span className="tabular">{lead.phone}</span>}
-                  {lead.region && <span>{lead.region}</span>}
-                  {lead.listed_price != null && <span className="tabular">{lead.listed_price.toLocaleString()}</span>}
+                <div className="name">
+                  {chat.name || chat.phone || chat.telegram_id}
+                  {chat.context === 'group' && <span className="pill muted" style={{ marginInlineStart: 8 }}>👥</span>}
                 </div>
-                {lead.raw_message && <div className="meta" style={{ marginTop: 4 }}>«{lead.raw_message.slice(0, 120)}»</div>}
+                {chat.phone && <div className="meta"><span className="tabular">{chat.phone}</span></div>}
+                {chat.last_message && (
+                  <div className="meta" style={{ marginTop: 4 }}>«{chat.last_message.slice(0, 140)}»</div>
+                )}
                 <div className="meta" style={{ marginTop: 6, alignItems: 'center' }}>
                   <span className="pill muted">{t.roleLabel}</span>
                   <select
                     className="role-select"
-                    value={lead.role || 'unknown'}
-                    onChange={(e) => setRole(lead.id, e.target.value)}
+                    value={chat.role || 'unknown'}
+                    onChange={(e) => setRole(chat.id, e.target.value)}
                   >
                     <option value="owner">{t.owner}</option>
                     <option value="client">{t.client}</option>

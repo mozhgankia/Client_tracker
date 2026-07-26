@@ -23,6 +23,7 @@ const { loadSessionString, deleteSessionString } = require('./sessionStore');
 const { isLikelyRealEstateMessage } = require('../shared/keywordFilter');
 const { extractLeadFromMessage } = require('../ai/geminiExtract');
 const { saveLead, leadExists } = require('../db/leads');
+const { getChat, upsertChat } = require('../db/chats');
 const { getSettings } = require('../db/settings');
 const { resolveRole } = require('../classify/classifier');
 
@@ -127,32 +128,85 @@ async function processTelegramMessage(userId, { text, sender, chatId, isPrivate 
   return 'saved';
 }
 
+// Labels a chat's text as owner/client/unknown using the AI. Never throws —
+// on any error (e.g. missing AI key) it returns 'unknown' so the chat is still
+// shown, just unlabelled.
+async function classifyRole(text, name) {
+  if (!text) return 'unknown';
+  try {
+    const extracted = await extractLeadFromMessage(text, { senderName: name });
+    return extracted.is_relevant && extracted.role ? extracted.role : 'unknown';
+  } catch (err) {
+    return 'unknown';
+  }
+}
+
+function senderDisplayName(sender, fallback) {
+  const n = sender ? [sender.firstName, sender.lastName].filter(Boolean).join(' ').trim() : '';
+  return n || sender?.username || fallback;
+}
+
+// Upserts the inbox chat row for a Telegram message (all messages, not just
+// real-estate ones), (re)labelling it unless the user set the label manually.
+async function upsertTelegramChat(userId, { chatId, text, sender, isPrivate, name, at }) {
+  const displayName = name || senderDisplayName(sender, String(chatId));
+  const existing = await getChat(userId, 'telegram', chatId);
+  let role = existing?.role || 'unknown';
+  let roleSource = existing?.role_source || 'ai';
+  const changed = !existing || existing.last_message !== text;
+  if (text && changed && roleSource !== 'manual') {
+    role = await classifyRole(text, displayName);
+    roleSource = 'ai';
+  }
+  await upsertChat(userId, {
+    source: 'telegram',
+    chatId,
+    context: isPrivate ? 'direct' : 'group',
+    name: displayName,
+    phone: sender?.phone ? `+${sender.phone}` : existing?.phone || null,
+    telegramId: sender?.id != null ? String(sender.id) : existing?.telegram_id || null,
+    lastMessage: text || existing?.last_message || null,
+    lastMessageAt: at || new Date().toISOString(),
+    role,
+    roleSource,
+  });
+}
+
 async function handleNewMessage(userId, event) {
   const message = event.message;
   if (message.out) return; // ignore our own outgoing messages
   const text = message.message;
-  if (!text || !isLikelyRealEstateMessage(text)) return;
   const sender = message.sender || (await message.getSender().catch(() => null));
-  const result = await processTelegramMessage(userId, {
+
+  // Inbox: keep the chat's last message + label fresh for every message.
+  await upsertTelegramChat(userId, {
+    chatId: message.chatId,
     text,
     sender,
-    chatId: message.chatId,
     isPrivate: message.isPrivate,
-  });
-  if (result === 'saved') console.log(`[telegram] لید زنده ذخیره شد (کاربر ${userId})`);
+    at: message.date ? new Date(message.date * 1000).toISOString() : undefined,
+  }).catch((err) => console.error(`[telegram] به‌روزرسانی چت شکست خورد:`, err.message));
+
+  // Leads / A2A: only real-estate messages feed the leads page + A2A board.
+  if (text && isLikelyRealEstateMessage(text)) {
+    await processTelegramMessage(userId, { text, sender, chatId: message.chatId, isPrivate: message.isPrivate }).catch(
+      (err) => console.error(`[telegram] پردازش لید شکست خورد:`, err.message)
+    );
+  }
 }
 
 /**
- * Back-fills recent Telegram history through the same pipeline, and returns
- * detailed counts so we can see exactly where messages drop out. Bounded so it
- * never runs the AI thousands of times.
- * @returns {Promise<{dialogs:number, messages:number, candidates:number, saved:number, irrelevant:number, dedup:number, failed:number}>}
+ * Mirrors the account's Telegram chat list into the inbox: one `chats` row per
+ * dialog (ALL chats, not just real-estate ones), each labelled owner/client/
+ * unknown by the AI. Also feeds the recent real-estate messages of each dialog
+ * into the leads/A2A pipeline. Never hides a chat for lacking keywords.
+ * @returns {Promise<{dialogs:number, chats:number, labeled:number, leads:number, failed:number}>}
  */
 async function syncTelegramHistory(userId, client, opts = {}) {
-  const maxDialogs = opts.maxDialogs || 40;
-  const perDialog = opts.perDialog || 60;
-  const maxAiCalls = opts.maxAiCalls || 300;
-  const stats = { dialogs: 0, messages: 0, candidates: 0, saved: 0, irrelevant: 0, dedup: 0, failed: 0 };
+  const maxDialogs = opts.maxDialogs || 60;
+  const perDialog = opts.perDialog || 40;
+  const maxLeadCalls = opts.maxLeadCalls || 200;
+  const stats = { dialogs: 0, chats: 0, labeled: 0, leads: 0, failed: 0 };
 
   let dialogs;
   try {
@@ -164,51 +218,72 @@ async function syncTelegramHistory(userId, client, opts = {}) {
   console.log(`[telegram] همگام‌سازی: ${dialogs.length} گفتگو یافت شد (کاربر ${userId})`);
 
   for (const dialog of dialogs) {
-    if (stats.candidates >= maxAiCalls) break;
     stats.dialogs++;
     const isPrivate = Boolean(dialog.isUser);
-    const target = dialog.entity || dialog.inputEntity || dialog.id;
-    if (!target) continue;
+    const chatId = String(dialog.id);
+    const entity = dialog.entity;
+    const name =
+      dialog.title ||
+      dialog.name ||
+      senderDisplayName(entity, chatId);
+    const lastMsg = dialog.message?.message || '';
+    const lastAt = dialog.message?.date ? new Date(dialog.message.date * 1000).toISOString() : null;
 
-    let messages;
+    // 1) Always record the chat itself (so the inbox mirrors Telegram).
     try {
-      messages = await client.getMessages(target, { limit: perDialog });
+      const existing = await getChat(userId, 'telegram', chatId);
+      let role = existing?.role || 'unknown';
+      let roleSource = existing?.role_source || 'ai';
+      const changed = !existing || existing.last_message !== lastMsg;
+      if (lastMsg && changed && roleSource !== 'manual') {
+        role = await classifyRole(lastMsg, name);
+        roleSource = 'ai';
+        stats.labeled++;
+      }
+      await upsertChat(userId, {
+        source: 'telegram',
+        chatId,
+        context: isPrivate ? 'direct' : 'group',
+        name,
+        phone: entity?.phone ? `+${entity.phone}` : null,
+        telegramId: entity?.id != null ? String(entity.id) : null,
+        lastMessage: lastMsg,
+        lastMessageAt: lastAt,
+        role,
+        roleSource,
+      });
+      stats.chats++;
     } catch (err) {
-      console.warn(`[telegram] خواندن پیام‌های «${dialog.title || dialog.name || dialog.id}» شکست خورد:`, err.message);
-      continue;
+      stats.failed++;
+      console.warn(`[telegram] ثبت چت «${name}» شکست خورد:`, err.message);
     }
 
-    let candidatesHere = 0;
-    for (const message of messages) {
-      const text = message.message;
-      if (!text || message.out) continue; // no text, or our own message
-      stats.messages++;
-      if (!isLikelyRealEstateMessage(text)) continue; // gate AI calls
-      if (stats.candidates >= maxAiCalls) break;
-      stats.candidates++;
-      candidatesHere++;
+    // 2) Feed recent real-estate messages of this dialog into leads/A2A.
+    if (stats.leads < maxLeadCalls) {
+      let messages;
       try {
-        const sender = message.sender || (await message.getSender().catch(() => null));
-        const result = await processTelegramMessage(userId, {
-          text,
-          sender,
-          chatId: message.chatId ?? dialog.id,
-          isPrivate,
-        });
-        stats[result] = (stats[result] || 0) + 1; // saved | dedup | irrelevant
+        messages = await client.getMessages(entity || dialog.inputEntity || dialog.id, { limit: perDialog });
       } catch (err) {
-        stats.failed++;
+        continue;
       }
-    }
-    if (candidatesHere) {
-      console.log(`[telegram] «${dialog.title || dialog.name || dialog.id}»: ${candidatesHere} پیام مرتبط`);
+      for (const message of messages) {
+        const text = message.message;
+        if (!text || message.out || !isLikelyRealEstateMessage(text)) continue;
+        if (stats.leads >= maxLeadCalls) break;
+        try {
+          const sender = message.sender || (await message.getSender().catch(() => null));
+          const result = await processTelegramMessage(userId, { text, sender, chatId: message.chatId ?? dialog.id, isPrivate });
+          if (result === 'saved') stats.leads++;
+        } catch (err) {
+          /* skip one bad message */
+        }
+      }
     }
   }
 
   console.log(
     `[telegram] همگام‌سازی تمام شد (کاربر ${userId}): ` +
-      `${stats.dialogs} گفتگو، ${stats.messages} پیام، ${stats.candidates} مرتبط، ` +
-      `${stats.saved} ذخیره، ${stats.irrelevant} نامرتبط، ${stats.dedup} تکراری`
+      `${stats.dialogs} گفتگو، ${stats.chats} چت ثبت شد، ${stats.labeled} برچسب، ${stats.leads} لید`
   );
   return stats;
 }
