@@ -90,6 +90,14 @@ async function startWhatsAppConnection(userId, phone) {
 
     sock.ev.on('creds.update', saveCreds);
     sock.ev.on('connection.update', (update) => handleConnectionUpdate(userId, entry, sock, update));
+    // On connect, Baileys streams the account's recent chat history in one or
+    // more batches. Mirror those chats into the inbox so opening WhatsApp shows
+    // past conversations too (like Telegram's sync) — not just new messages.
+    sock.ev.on('messaging-history.set', (payload) => {
+      handleHistorySync(userId, payload).catch((err) =>
+        console.error(`[whatsapp:${userId}] همگام‌سازی تاریخچه شکست خورد:`, err.message)
+      );
+    });
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       if (type !== 'notify') return;
       for (const msg of messages) {
@@ -207,11 +215,13 @@ async function handleIncomingMessage(userId, msg) {
       source: 'whatsapp',
       chatId: jid,
       context,
-      name: senderName || phone,
+      chatType: isGroup ? 'group' : 'private',
+      name: existing?.name || senderName || phone,
       phone,
       telegramId: null,
       lastMessage: text,
       lastMessageAt: new Date().toISOString(),
+      unread: (existing?.unread || 0) + 1,
       role,
       roleSource,
     });
@@ -234,6 +244,84 @@ async function handleIncomingMessage(userId, msg) {
   console.log(
     `[whatsapp:${userId}] لید ${context} ذخیره شد (${extracted.role} / ${extracted.request_type}) از ${senderName || phone}`
   );
+}
+
+// A messenger-style preview for a WhatsApp message's content: the text if
+// there is one, otherwise a short media placeholder (matches the Telegram inbox).
+function waMessagePreview(message) {
+  if (!message) return '';
+  if (message.conversation) return message.conversation;
+  if (message.extendedTextMessage?.text) return message.extendedTextMessage.text;
+  if (message.imageMessage) return message.imageMessage.caption || '🖼 عکس';
+  if (message.videoMessage) return message.videoMessage.caption || '🎬 ویدیو';
+  if (message.audioMessage) return '🎤 پیام صوتی';
+  if (message.stickerMessage) return '🈶 استیکر';
+  if (message.documentMessage) return '📎 فایل';
+  if (message.locationMessage) return '📍 موقعیت مکانی';
+  if (message.contactMessage) return '👤 مخاطب';
+  return '';
+}
+
+const tsToNumber = (ts) => Number(ts && ts.toNumber ? ts.toNumber() : ts) || 0;
+
+/**
+ * Mirrors WhatsApp's on-connect history batch into the inbox — one `chats` row
+ * per conversation (name, last-message preview, time, unread, type), like the
+ * Telegram sync. Skips status/broadcast/newsletter jids and never overwrites a
+ * manual role. Does no AI calls, so it always works.
+ */
+async function handleHistorySync(userId, { chats = [], contacts = [], messages = [] } = {}) {
+  if (!chats.length) return;
+
+  const nameByJid = new Map();
+  for (const c of contacts) {
+    if (c?.id) nameByJid.set(c.id, c.name || c.notify || null);
+  }
+  // Latest message text per chat, from the history batch's messages.
+  const lastByJid = new Map();
+  for (const m of messages) {
+    const jid = m?.key?.remoteJid;
+    if (!jid) continue;
+    const ts = tsToNumber(m.messageTimestamp);
+    const prev = lastByJid.get(jid);
+    if (!prev || ts >= prev.ts) lastByJid.set(jid, { ts, text: waMessagePreview(m.message) });
+  }
+
+  let count = 0;
+  for (const chat of chats) {
+    const jid = chat?.id;
+    if (!jid) continue;
+    const isGroup = jid.endsWith('@g.us');
+    const isDirect = jid.endsWith('@s.whatsapp.net');
+    if (!isGroup && !isDirect) continue; // skip status@broadcast / newsletter / etc.
+
+    const phone = isDirect ? jid.split('@')[0].split(':')[0] : null;
+    const name = chat.name || nameByJid.get(jid) || phone || jid;
+    const last = lastByJid.get(jid);
+    const tsNum = tsToNumber(chat.conversationTimestamp) || (last ? last.ts : 0);
+    try {
+      const existing = await getChat(userId, 'whatsapp', jid);
+      await upsertChat(userId, {
+        source: 'whatsapp',
+        chatId: jid,
+        context: isGroup ? 'group' : 'direct',
+        chatType: isGroup ? 'group' : 'private',
+        name,
+        phone,
+        telegramId: null,
+        lastMessage: (last && last.text) || existing?.last_message || null,
+        lastMessageAt: tsNum ? new Date(tsNum * 1000).toISOString() : existing?.last_message_at || null,
+        unread:
+          typeof chat.unreadCount === 'number' && chat.unreadCount > 0 ? chat.unreadCount : existing?.unread || 0,
+        role: existing?.role || 'unknown',
+        roleSource: existing?.role_source || 'ai',
+      });
+      count++;
+    } catch (err) {
+      console.warn(`[whatsapp:${userId}] ثبت چت واتساپ شکست خورد:`, err.message);
+    }
+  }
+  console.log(`[whatsapp:${userId}] تاریخچه همگام شد: ${count} از ${chats.length} گفتگو ثبت شد.`);
 }
 
 /** Logs the tenant out and forgets the in-memory connection (used by the

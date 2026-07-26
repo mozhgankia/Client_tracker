@@ -1,10 +1,11 @@
 'use client';
 
-// Live message inbox: the real messages the WhatsApp/Telegram listeners
-// extracted, split into a WhatsApp tab and a Telegram tab. Each contact is
-// auto-marked (owner/client/unknown) by the AI and can be re-marked by hand
-// with the dropdown; a "clients only" filter narrows each tab to buyers.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+// Live message inbox — mirrors the account's Telegram/WhatsApp chat list like
+// Web Telegram / WhatsApp: one clean row per conversation (avatar, name, last
+// message preview, time, unread badge, chat-type icon). No login codes, no
+// service chats. Each chat can be marked مشتری/مالک/همکار/نامشخص by hand, and a
+// "clients only" filter narrows the list to buyers.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/api';
 import { useAuth } from '../../../lib/AuthContext';
 import { useLanguage } from '../../../lib/LanguageContext';
@@ -12,65 +13,108 @@ import { useLanguage } from '../../../lib/LanguageContext';
 const STRINGS = {
   fa: {
     title: '📨 صندوق پیام‌ها',
-    desc: 'چت‌های زنده‌ای که ربات از واتساپ و تلگرام دریافت کرده — هر پلتفرم در تب خودش.',
+    desc: 'همه‌ی چت‌های تلگرام و واتساپ شما، درست مثل نسخه‌ی وب — بدون کد ورود یا پیام سیستمی.',
     tabWhatsapp: '💬 واتساپ',
     tabTelegram: '✈️ تلگرام',
     all: 'همه',
     clientsOnly: 'فقط مشتری‌ها',
-    empty: 'در این صندوق پیامی نیست.',
-    emptyClients: 'مشتری‌ای در این تب پیدا نشد.',
-    roleLabel: 'دسته:',
+    empty: 'هنوز چتی اینجا نیست. در حال همگام‌سازی…',
+    emptyClients: 'مخاطبی در این پوشه پیدا نشد.',
     owner: 'مالک',
     client: 'مشتری',
+    colleague: 'همکار',
     unknown: 'نامشخص',
-    count: (n) => `${n} مخاطب`,
+    count: (n) => `${n} گفتگو`,
     sync: '🔄 همگام‌سازی تلگرام',
     syncing: 'در حال همگام‌سازی…',
+    autoSync: '⏳ سینک خودکار با تلگرام…',
+    typePrivate: 'خصوصی',
+    typeGroup: 'گروه',
+    typeChannel: 'کانال',
     syncDone: (s) =>
-      `همگام‌سازی شد: ${s.chats ?? 0} چت از ${s.dialogs ?? 0} گفتگو · ${s.labeled ?? 0} برچسب‌خورده` +
+      `همگام‌سازی شد: ${s.chats ?? 0} چت از ${s.dialogs ?? 0} گفتگو` +
+      (s.skipped ? ` · ${s.skipped} نادیده` : '') +
       (s.failed ? ` · ${s.failed} خطا` : ''),
   },
   en: {
     title: '📨 Inbox',
-    desc: 'Live chats the bot received from WhatsApp and Telegram — each platform in its own tab.',
+    desc: 'All your Telegram & WhatsApp chats, just like the web app — no login codes, no system messages.',
     tabWhatsapp: '💬 WhatsApp',
     tabTelegram: '✈️ Telegram',
     all: 'All',
     clientsOnly: 'Clients only',
-    empty: 'No messages in this inbox.',
-    emptyClients: 'No clients in this tab.',
-    roleLabel: 'Category:',
+    empty: 'No chats here yet. Syncing…',
+    emptyClients: 'No contacts in this folder.',
     owner: 'Owner',
     client: 'Client',
+    colleague: 'Colleague',
     unknown: 'Unknown',
-    count: (n) => `${n} contacts`,
+    count: (n) => `${n} conversations`,
     sync: '🔄 Sync Telegram',
     syncing: 'Syncing…',
+    autoSync: '⏳ Auto-syncing Telegram…',
+    typePrivate: 'Private',
+    typeGroup: 'Group',
+    typeChannel: 'Channel',
     syncDone: (s) =>
-      `Synced: ${s.chats ?? 0} chats from ${s.dialogs ?? 0} dialogs · ${s.labeled ?? 0} labeled` +
+      `Synced: ${s.chats ?? 0} chats from ${s.dialogs ?? 0} dialogs` +
+      (s.skipped ? ` · ${s.skipped} skipped` : '') +
       (s.failed ? ` · ${s.failed} errors` : ''),
   },
   ar: {
     title: '📨 صندوق الرسائل',
-    desc: 'المحادثات الحية التي استقبلها البوت من واتساب وتيليجرام — كل منصة في تبويبها.',
+    desc: 'كل محادثات تيليجرام وواتساب، تمامًا مثل نسخة الويب — بدون رموز دخول أو رسائل نظام.',
     tabWhatsapp: '💬 واتساب',
     tabTelegram: '✈️ تيليجرام',
     all: 'الكل',
     clientsOnly: 'العملاء فقط',
-    empty: 'لا رسائل في هذا الصندوق.',
-    emptyClients: 'لا عملاء في هذا التبويب.',
-    roleLabel: 'الفئة:',
+    empty: 'لا محادثات بعد. جارٍ المزامنة…',
+    emptyClients: 'لا جهات في هذا المجلد.',
     owner: 'مالك',
     client: 'عميل',
+    colleague: 'زميل',
     unknown: 'غير معروف',
-    count: (n) => `${n} جهة اتصال`,
+    count: (n) => `${n} محادثة`,
     sync: '🔄 مزامنة تيليجرام',
     syncing: 'جارٍ المزامنة…',
+    autoSync: '⏳ مزامنة تلقائية مع تيليجرام…',
+    typePrivate: 'خاص',
+    typeGroup: 'مجموعة',
+    typeChannel: 'قناة',
     syncDone: (s) =>
-      `تمت المزامنة: ${s.chats ?? 0} محادثة من ${s.dialogs ?? 0} · ${s.labeled ?? 0} موسومة` +
+      `تمت المزامنة: ${s.chats ?? 0} محادثة من ${s.dialogs ?? 0}` +
+      (s.skipped ? ` · ${s.skipped} متجاهَل` : '') +
       (s.failed ? ` · ${s.failed} أخطاء` : ''),
   },
 };
+
+// A stable soft color for the letter-avatar, derived from the chat name.
+const AVATAR_COLORS = ['#0e9f6e', '#c69749', '#3b82f6', '#8b5cf6', '#ef4444', '#0891b2', '#d97706', '#db2777'];
+function avatarColor(seed = '') {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+function initials(name = '') {
+  const s = name.trim();
+  if (!s) return '?';
+  const parts = s.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return parts[0].slice(0, 2);
+  return (parts[0][0] || '') + (parts[1][0] || '');
+}
+
+function formatTime(iso, lang) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const locale = lang === 'fa' ? 'fa-IR' : lang === 'ar' ? 'ar' : 'en-GB';
+  if (sameDay) return d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString(locale, { day: '2-digit', month: '2-digit' });
+}
+
+const TYPE_ICON = { private: '👤', group: '👥', channel: '📢' };
 
 export default function InboxPage() {
   const { token } = useAuth();
@@ -78,12 +122,16 @@ export default function InboxPage() {
   const t = STRINGS[lang] || STRINGS.fa;
 
   const [source, setSource] = useState('telegram'); // 'telegram' | 'whatsapp'
-  const [onlyClients, setOnlyClients] = useState(false);
+  const [folder, setFolder] = useState('all'); // all | client | owner | colleague | unknown
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [syncing, setSyncing] = useState(false);
+  const [autoSyncing, setAutoSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
+  // Remembers which sources we've already auto-synced this session, so opening
+  // the tab once triggers a background sync but flipping tabs doesn't spam it.
+  const autoSyncedRef = useRef({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -96,9 +144,32 @@ export default function InboxPage() {
     }
   }, [token, source]);
 
+  // Auto-sync on open: the first time a source is shown, pull its chat list in
+  // the background (like Web Telegram loading your chats when you open it),
+  // then load. Telegram has a real backfill endpoint; WhatsApp's history is
+  // populated server-side on connect, so here we just (re)load its list.
   useEffect(() => {
-    if (token) load();
-  }, [token, load]);
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      if (source === 'telegram' && !autoSyncedRef.current.telegram) {
+        autoSyncedRef.current.telegram = true;
+        setAutoSyncing(true);
+        try {
+          await apiFetch('/api/telegram/sync', { method: 'POST', body: {}, token });
+        } catch (_err) {
+          // Not connected yet or transient — stay quiet for a background sync;
+          // the manual button surfaces errors when the user asks explicitly.
+        } finally {
+          if (!cancelled) setAutoSyncing(false);
+        }
+      }
+      if (!cancelled) await load();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, source, load]);
 
   const setRole = async (id, role) => {
     try {
@@ -109,7 +180,7 @@ export default function InboxPage() {
     }
   };
 
-  // Pull previous Telegram chats through the pipeline, then reload.
+  // Pull the account's Telegram chat list into the inbox, then reload.
   const handleSync = async () => {
     setSyncing(true);
     setSyncMsg('');
@@ -126,8 +197,24 @@ export default function InboxPage() {
   };
 
   const visible = useMemo(
-    () => (onlyClients ? chats.filter((c) => c.role === 'client') : chats),
-    [chats, onlyClients]
+    () => (folder === 'all' ? chats : chats.filter((c) => (c.role || 'unknown') === folder)),
+    [chats, folder]
+  );
+
+  // Category "folders" — همه + the four labels, each showing its own count.
+  const FOLDERS = useMemo(
+    () => [
+      { key: 'all', label: t.all },
+      { key: 'client', label: t.client },
+      { key: 'owner', label: t.owner },
+      { key: 'colleague', label: t.colleague },
+      { key: 'unknown', label: t.unknown },
+    ],
+    [t]
+  );
+  const folderCount = useCallback(
+    (key) => (key === 'all' ? chats.length : chats.filter((c) => (c.role || 'unknown') === key).length),
+    [chats]
   );
 
   return (
@@ -139,8 +226,8 @@ export default function InboxPage() {
         </div>
         <div className="actions">
           {source === 'telegram' && (
-            <button className="btn accent" onClick={handleSync} disabled={syncing}>
-              {syncing ? t.syncing : t.sync}
+            <button className="btn accent" onClick={handleSync} disabled={syncing || autoSyncing}>
+              {autoSyncing ? t.autoSync : syncing ? t.syncing : t.sync}
             </button>
           )}
           <span className="desc tabular">{t.count(visible.length)}</span>
@@ -158,49 +245,63 @@ export default function InboxPage() {
           </button>
         </div>
 
-        {/* clients-only filter */}
+        {/* category folders: همه / مشتری / مالک / همکار / نامشخص */}
         <div className="filters">
-          <div className={`chip${!onlyClients ? ' active' : ''}`} onClick={() => setOnlyClients(false)}>
-            {t.all}
-          </div>
-          <div className={`chip${onlyClients ? ' active' : ''}`} onClick={() => setOnlyClients(true)}>
-            {t.clientsOnly}
-          </div>
+          {FOLDERS.map((f) => (
+            <div
+              key={f.key}
+              className={`chip${folder === f.key ? ' active' : ''}`}
+              onClick={() => setFolder(f.key)}
+            >
+              {f.label}
+              <span className="chip-count">{folderCount(f.key)}</span>
+            </div>
+          ))}
         </div>
 
         {error && <div className="form-error">{error}</div>}
         {syncMsg && <div className="form-notice">{syncMsg}</div>}
         {!loading && visible.length === 0 && (
-          <div className="empty-note">{onlyClients ? t.emptyClients : t.empty}</div>
+          <div className="empty-note">{folder === 'all' ? t.empty : t.emptyClients}</div>
         )}
 
-        <div className="card-list">
-          {visible.map((chat) => (
-            <div className="lead-card" key={chat.id}>
-              <div className="who">
-                <div className="name">
-                  {chat.name || chat.phone || chat.telegram_id}
-                  {chat.context === 'group' && <span className="pill muted" style={{ marginInlineStart: 8 }}>👥</span>}
+        <div className="chat-list">
+          {visible.map((chat) => {
+            const name = chat.name || chat.phone || chat.telegram_id || '—';
+            const type = chat.chat_type || (chat.context === 'group' ? 'group' : 'private');
+            return (
+              <div className="chat-row" key={chat.id}>
+                <div className="chat-avatar" style={{ background: avatarColor(name) }}>
+                  {initials(name)}
                 </div>
-                {chat.phone && <div className="meta"><span className="tabular">{chat.phone}</span></div>}
-                {chat.last_message && (
-                  <div className="meta" style={{ marginTop: 4 }}>«{chat.last_message.slice(0, 140)}»</div>
-                )}
-                <div className="meta" style={{ marginTop: 6, alignItems: 'center' }}>
-                  <span className="pill muted">{t.roleLabel}</span>
-                  <select
-                    className="role-select"
-                    value={chat.role || 'unknown'}
-                    onChange={(e) => setRole(chat.id, e.target.value)}
-                  >
-                    <option value="owner">{t.owner}</option>
-                    <option value="client">{t.client}</option>
-                    <option value="unknown">{t.unknown}</option>
-                  </select>
+                <div className="chat-main">
+                  <div className="chat-line1">
+                    <span className="chat-name">
+                      {TYPE_ICON[type] && <span className="chat-type-icon" title={t[`type${type[0].toUpperCase()}${type.slice(1)}`]}>{TYPE_ICON[type]}</span>}
+                      {name}
+                    </span>
+                    <span className="chat-time tabular">{formatTime(chat.last_message_at, lang)}</span>
+                  </div>
+                  <div className="chat-line2">
+                    <span className="chat-preview">{chat.last_message || ''}</span>
+                    {chat.unread > 0 && <span className="chat-unread">{chat.unread}</span>}
+                  </div>
+                  <div className="chat-line3">
+                    <select
+                      className={`role-select role-${chat.role || 'unknown'}`}
+                      value={chat.role || 'unknown'}
+                      onChange={(e) => setRole(chat.id, e.target.value)}
+                    >
+                      <option value="client">{t.client}</option>
+                      <option value="owner">{t.owner}</option>
+                      <option value="colleague">{t.colleague}</option>
+                      <option value="unknown">{t.unknown}</option>
+                    </select>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </>

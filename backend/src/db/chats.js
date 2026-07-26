@@ -23,11 +23,13 @@ async function upsertChat(userId, c) {
     source: c.source,
     chat_id: String(c.chatId),
     context: c.context || 'direct',
+    chat_type: c.chatType || null,
     name: c.name || null,
     phone: c.phone || null,
     telegram_id: c.telegramId || null,
     last_message: c.lastMessage || null,
     last_message_at: c.lastMessageAt || null,
+    unread: c.unread || 0,
     role: c.role || 'unknown',
     role_source: c.roleSource || 'ai',
     updated_at: new Date().toISOString(),
@@ -45,7 +47,7 @@ async function listChats(userId, { source } = {}) {
 }
 
 async function setChatRole(userId, id, role) {
-  if (!['owner', 'client', 'unknown'].includes(role)) throw new Error('نقش نامعتبر است.');
+  if (!['owner', 'client', 'colleague', 'unknown'].includes(role)) throw new Error('نقش نامعتبر است.');
   const { data, error } = await supabase
     .from('chats')
     .update({ role, role_source: 'manual', updated_at: new Date().toISOString() })

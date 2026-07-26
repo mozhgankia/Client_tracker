@@ -142,18 +142,23 @@ create table if not exists chats (
   source text not null,                 -- telegram | whatsapp
   chat_id text not null,                -- messenger's dialog/chat id
   context text not null default 'direct',
+  chat_type text,                       -- private | group | channel
   name text,
   phone text,
   telegram_id text,
   last_message text,
   last_message_at timestamptz,
-  role text not null default 'unknown', -- owner | client | unknown
+  unread integer not null default 0,
+  role text not null default 'unknown', -- owner | client | colleague | unknown
   role_source text not null default 'ai',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 create unique index if not exists chats_user_source_chat_uidx on chats(user_id, source, chat_id);
 create index if not exists chats_user_source_idx on chats(user_id, source);
+-- for databases that created `chats` before these columns existed:
+alter table chats add column if not exists chat_type text;
+alter table chats add column if not exists unread integer not null default 0;
 
 -- Single-use password-reset tokens (emailed to the user). Rows are deleted on
 -- use and ignored once expired.
